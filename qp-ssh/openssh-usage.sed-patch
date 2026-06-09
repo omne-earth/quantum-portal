@@ -1,0 +1,40 @@
+# OpenSSH hardcodes program names in usage() printf strings — the
+# autoconf program_prefix wired in by openssh-prefix.sed-patch only
+# affects install paths and the _PATH_* macros baked into binaries,
+# not these literal "usage: ssh ...", "usage: scp ..." strings.
+# Rewrite each in-place so `qp-ssh -h` prints `usage: qp-ssh ...`.
+#
+# Each binary has a leading "usage: <prog>" line and zero or more
+# continuation lines indented to align under the option list. The
+# alignment shifts by 3 columns once "qp-" is prepended; we leave the
+# leading whitespace untouched so the continuation columns stay
+# visually correct relative to the new prefix length (i.e., the new
+# alignment is 3 columns off, but readable — matches what `make`,
+# `cargo`, etc. produce when they're renamed too).
+
+# Primary usage lines
+s|"usage: ssh |"usage: qp-ssh |g
+s|"usage: scp |"usage: qp-scp |g
+s|"usage: sftp |"usage: qp-sftp |g
+s|"usage: sftp-server |"usage: qp-sftp-server |g
+s|"usage: sshd |"usage: qp-sshd |g
+s|"usage: ssh-add |"usage: qp-ssh-add |g
+s|"usage: ssh-agent |"usage: qp-ssh-agent |g
+s|"usage: ssh-keygen |"usage: qp-ssh-keygen |g
+s|"usage: ssh-keyscan |"usage: qp-ssh-keyscan |g
+s|"usage: ssh-keysign|"usage: qp-ssh-keysign|g
+s|"usage: ssh-pkcs11-helper|"usage: qp-ssh-pkcs11-helper|g
+s|"usage: ssh-sk-helper|"usage: qp-ssh-sk-helper|g
+
+# Continuation lines. Match "       <prog> " (trailing space) so this
+# catches both bracketed forms ("ssh [-Q ...]") and flag forms
+# ("ssh-keygen -p ...", "ssh-agent -u"). The trailing space keeps
+# `ssh ` from matching `ssh-add`, `ssh-agent`, etc.
+s|"       ssh |"       qp-ssh |g
+s|"       scp |"       qp-scp |g
+s|"       sftp |"       qp-sftp |g
+s|"       sshd |"       qp-sshd |g
+s|"       ssh-add |"       qp-ssh-add |g
+s|"       ssh-agent |"       qp-ssh-agent |g
+s|"       ssh-keygen |"       qp-ssh-keygen |g
+s|"       ssh-keyscan |"       qp-ssh-keyscan |g

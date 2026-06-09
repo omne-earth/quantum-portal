@@ -1,0 +1,57 @@
+<!--
+  qp-nebula sim node domain template (filled by provision.sh).
+  Two NICs: mgmt (mgmt isolated bridge - control/SSH) and underlay (node
+  isolated bridge - the real UDP underlay the tunnel forms over). UEFI (OVMF) to match
+  the base image's removable-media boot path. The qemu guest agent reports guest
+  addresses so the host can discover both NICs' IPs with no lease parsing. No vTPM -
+  qp-nebula seals nothing to hardware (certs are CA-signed files.
+  {{NODE}} = domain name, {{DISK}} = CoW qcow2 path.
+-->
+<domain type='kvm'>
+  <name>{{NODE}}</name>
+  <memory unit='MiB'>1024</memory>
+  <currentMemory unit='MiB'>1024</currentMemory>
+  <vcpu placement='static'>1</vcpu>
+  <os firmware='efi'>
+    <type arch='x86_64' machine='q35'>hvm</type>
+    <boot dev='hd'/>
+  </os>
+  <features>
+    <acpi/>
+    <apic/>
+  </features>
+  <cpu mode='host-passthrough' check='none'/>
+  <clock offset='utc'/>
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>destroy</on_crash>
+  <devices>
+    <emulator>/usr/bin/qemu-system-x86_64</emulator>
+    <disk type='file' device='disk'>
+      <driver name='qemu' type='qcow2'/>
+      <source file='{{DISK}}'/>
+      <target dev='vda' bus='virtio'/>
+    </disk>
+    <interface type='network'>
+      <source network='mgmt'/>
+      <model type='virtio'/>
+    </interface>
+    <interface type='network'>
+      <source network='{{ULAYNET}}'/>
+      <model type='virtio'/>
+    </interface>
+    <serial type='pty'>
+      <target type='isa-serial' port='0'/>
+    </serial>
+    <console type='pty'>
+      <target type='serial' port='0'/>
+    </console>
+    <channel type='unix'>
+      <target type='virtio' name='org.qemu.guest_agent.0'/>
+    </channel>
+    <rng model='virtio'>
+      <backend model='random'>/dev/urandom</backend>
+    </rng>
+    <memballoon model='virtio'/>
+  </devices>
+</domain>

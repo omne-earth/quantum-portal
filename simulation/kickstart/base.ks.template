@@ -1,0 +1,58 @@
+# Fedora Server 44 kickstart - shared sim BASE image (BAREBONES).
+#
+# Built once into a base qcow2, then copy-on-write cloned per VM. Stock Fedora Server +
+# ssh + a handful of net tools - NO component stack baked in. Each test pushes its own
+# payload over the mgmt ssh channel post-boot (an rpm to install, or a prebuilt binary +
+# config), so the base carries no vendor/registry dependency at all. UEFI install so CoW
+# clones boot via the removable-media path (the %post fixup below).
+#
+# Template - build-base.sh renders the single {{SSH_PUBKEY}} placeholder (the sim's
+# provision key) into root's authorized_keys, so `ssh -i .ssh/provision_key root@<vm>`
+# works against every clone.
+
+text
+lang en_US.UTF-8
+keyboard us
+timezone UTC --utc
+firstboot --disable
+selinux --enforcing
+# ssh only; the qp-nebula underlay (4242/udp) rides the isolated underlay NIC, which
+# the firewall's default zone does not police between nodes on the same L2.
+firewall --enabled --ssh
+
+clearpart --all --initlabel --disklabel=gpt
+autopart --type=plain --nohome
+bootloader --append="console=ttyS0,115200n8 console=tty0"
+
+# mgmt interface (mgmt, DHCP). The underlay NIC is brought up per-node by the harness.
+network --bootproto=dhcp --device=link --activate --hostname=node
+
+# Lab access (isolated network). Root password is lab-only; the SSH key is the real path in.
+rootpw --plaintext qpnlab
+sshkey --username=root "{{SSH_PUBKEY}}"
+
+services --enabled=sshd,chronyd,qemu-guest-agent
+poweroff
+
+%packages --excludedocs --inst-langs=en --ignoremissing
+@^server-product-environment
+# guest agent: reports guest NIC addresses to the host so `virsh domifaddr --source
+# agent` can discover the mgmt + underlay addresses without reading a DHCP lease.
+qemu-guest-agent
+# net tooling the tests use inside a node: ip/tc (iproute), ping (iputils), and the
+# netem qdisc (kernel-modules-extra) for stress-loss link impairment.
+iproute
+iputils
+kernel-modules-extra
+%end
+
+%post --log=/root/ks-post.log
+# UEFI fallback boot path - CoW clones boot with a FRESH (empty) OVMF nvram (no
+# "Fedora" boot entry), so the image must be bootable via \EFI\BOOT\BOOTX64.EFI.
+# Both shim + grub are Secure Boot signed, so this works with secure boot on.
+if [ -d /boot/efi/EFI/fedora ]; then
+  mkdir -p /boot/efi/EFI/BOOT
+  cp -f /boot/efi/EFI/fedora/shimx64.efi  /boot/efi/EFI/BOOT/BOOTX64.EFI
+  cp -f /boot/efi/EFI/fedora/grubx64.efi  /boot/efi/EFI/BOOT/grubx64.efi
+fi
+%end

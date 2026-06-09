@@ -1,0 +1,31 @@
+# OpenSSH path constants — rewrite the user/config tree, default
+# identity filenames, and host-key filenames to the qp- naming
+# convention so the runtime layout matches the binary prefix.
+#
+# Applied to pathnames.h (the path macros every binary pulls in) and
+# to *.c (catches any literal path string outside the header). After
+# this patch:
+#
+#   ~/.ssh                  -> ~/.qp-ssh
+#   id_<keytype>            -> qp-id_<keytype>   (ssh-keygen defaults)
+#   ssh_host_<keytype>_key  -> qp-ssh_host_<keytype>_key
+#
+# These are all C string-literal rewrites — each pattern is anchored
+# on a leading double-quote so substrings inside code identifiers
+# (e.g. ssh_host_key_t struct names, ID_FILE macros) are untouched.
+
+# User config dir: ".ssh", ".ssh/...", "~/.ssh", "~/.ssh/..."
+s|"\.ssh"|".qp-ssh"|g
+s|"\.ssh/|".qp-ssh/|g
+s|"~/\.ssh"|"~/.qp-ssh"|g
+s|"~/\.ssh/|"~/.qp-ssh/|g
+
+# System host-key filenames (system layout under $sysconfdir).
+# pathnames.h has them as `SSHDIR "/ssh_host_<keytype>_key"` — the
+# leading `/` is inside the string literal, so anchor on `"/`.
+s|"/ssh_host_|"/qp-ssh_host_|g
+
+# Default identity filenames consulted by ssh-keygen when -f is
+# omitted (and by the ssh client when looking for default identities).
+# Same shape: `_PATH_SSH_USER_DIR "/id_<keytype>"`.
+s|"/id_|"/qp-id_|g

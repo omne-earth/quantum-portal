@@ -1,0 +1,27 @@
+.sentinel
+.build
+.stage
+.submodules
+.qp
+deploy/
+*.qp-root
+.notes/
+dist/
+.env
+.secrets
+
+# selinux transients
+qp-*/selinux/tmp/
+qp-*/selinux/*.pp
+
+# sim provision key
+simulation/.ssh/
+
+# per-run smoke logs
+.logs/
+
+# go coverage profiles
+.coverage/
+
+# RPM signing key material
+certs/

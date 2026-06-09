@@ -1,0 +1,65 @@
+## <summary>Post-quantum SSH (qp-ssh) — qp_sshd_t daemon + client interfaces.</summary>
+
+########################################
+## <summary>
+##	Connect to qp-sshd over TCP — the custom qp_ssh_port_t (1716). For a
+##	domain that probes the post-quantum admin channel
+##	Use this instead of a raw `gen_require` for the port type.
+## </summary>
+## <param name="domain">
+##	<summary>
+##	Domain allowed to connect to the qp-ssh port.
+##	</summary>
+## </param>
+#
+interface(`qp_ssh_tcp_connect',`
+	gen_require(`
+		type qp_ssh_port_t;
+	')
+
+	allow $1 self:tcp_socket create_socket_perms;
+	allow $1 qp_ssh_port_t:tcp_socket name_connect;
+	corenet_tcp_sendrecv_generic_if($1)
+	corenet_tcp_sendrecv_generic_node($1)
+')
+
+########################################
+## <summary>
+##	Execute the qp-ssh client tools (qp-ssh, qp-scp, qp-sftp, ...) in the
+##	caller's own domain — no transition. The client connects out to a
+##	qp-sshd; DAC + network policy gate it from there.
+## </summary>
+## <param name="domain">
+##	<summary>
+##	Domain allowed to execute the qp-ssh client binaries.
+##	</summary>
+## </param>
+#
+interface(`qp_ssh_exec',`
+	gen_require(`
+		type qp_ssh_exec_t;
+	')
+
+	corecmd_search_bin($1)
+	can_exec($1, qp_ssh_exec_t)
+')
+
+########################################
+## <summary>
+##	Read qp-sshd's config tree under /usr/local/qp/etc (qp-sshd_config,
+##	ssh_config, moduli, host-key *.pub) — NOT the private host keys.
+## </summary>
+## <param name="domain">
+##	<summary>
+##	Domain allowed to read the qp-ssh config files.
+##	</summary>
+## </param>
+#
+interface(`qp_ssh_read_config',`
+	gen_require(`
+		type qp_sshd_etc_t;
+	')
+
+	read_files_pattern($1, qp_sshd_etc_t, qp_sshd_etc_t)
+	list_dirs_pattern($1, qp_sshd_etc_t, qp_sshd_etc_t)
+')

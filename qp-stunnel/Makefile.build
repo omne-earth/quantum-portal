@@ -1,0 +1,75 @@
+# qp-stunnel/Makefile.build — compile the stunnel PQ-TLS terminator.
+#
+# stunnel is linked against qp-ssh's bundled OpenSSL 3.6.2 (the native ML-KEM /
+# ML-DSA engine), NOT a second openssl — qp-stunnel Requires qp-ssh. Runs INSIDE
+# the qp-toolbox (the component Makefile wraps this whole sub-make in $(T)). BUILD-time
+# it links against qp-ssh's BUILT tree (repo-root .qp), so `make build` works standalone
+# without qp-ssh installed; the binary is rpath'd to the RUNTIME $(QP_PREFIX)/lib, where
+# the installed qp-ssh provides the same bundled OpenSSL at run time.
+SHELL := bash
+.ONESHELL:
+.SHELLFLAGS := -ueo pipefail -c
+
+include ../.env
+
+# Read-only git credentials for the fork mirrors come ONLY from ../.secrets
+# (GIT_RO_USERNAME / GIT_RO_PASSWORD), never from ~/.netrc. Optional include so
+# non-clone targets still work without it; the clone recipe guards on the creds.
+-include ../.secrets
+export GIT_RO_USERNAME GIT_RO_PASSWORD
+
+# CLONE_RO clones a git mirror, authenticating with a transient HTTP Basic-auth
+# header built from .secrets AT RECIPE TIME via a subshell ($$(...), not make
+# expansion) — so credentials never appear in make's echoed recipe, the build log,
+# or the cloned repo's .git/config, and never come from netrc. credential.helper=
+# also disables any ambient helper. RO_GUARD fails fast when the creds are absent.
+RO_GUARD = [ -n "$${GIT_RO_USERNAME:-}" ] && [ -n "$${GIT_RO_PASSWORD:-}" ] || { echo "ERROR: read-only git creds missing - set GIT_RO_USERNAME/GIT_RO_PASSWORD in ../.secrets (never ~/.netrc)"; exit 1; }
+CLONE_RO = git -c credential.helper= -c http.extraHeader="Authorization: Basic $$(printf '%s:%s' "$${GIT_RO_USERNAME}" "$${GIT_RO_PASSWORD}" | base64 | tr -d '\n')" clone
+
+# Build-time OpenSSL = qp-ssh's BUILT, flattened tree at the repo root ($(CURDIR) is
+# qp-stunnel/ under `make -C qp-stunnel`, so ../.qp is repo-root/.qp). No install needed.
+# Runtime RPATH stays the INSTALLED location, where qp-ssh ships the same .so.
+SSL_BUILD := $(abspath $(CURDIR)/../.qp)
+SSL_RPATH := $(QP_PREFIX)/lib
+
+SRC   := .build/stunnel-$(STUNNEL_VER)
+STAGE := .stage
+BIN   := $(STAGE)/qp-stunnel
+
+.PHONY: build clean
+
+build: $(BIN)
+
+# Stage the built binary under a stable name the component + payload consume.
+$(BIN): $(SRC)/src/stunnel
+	@mkdir -p $(STAGE)
+	cp $(SRC)/src/stunnel $(BIN)
+	@echo "[qp-stunnel.build] staged $(BIN)"
+
+# Configure (against the bundled openssl) + compile.
+#
+# A git checkout doesn't preserve mtimes the way a release tarball does (generated
+# autotools files stamped newer than their sources), and stunnel has no
+# AM_MAINTAINER_MODE guard — so make would try to re-run aclocal/autoconf/automake/
+# autoheader (exact tool versions, absent in the toolbox). Point those tools at ':'
+# so the maintainer rebuild rules become no-ops and the committed configure /
+# Makefile.in / aclocal.m4 are used as-is — no file restamping needed.
+$(SRC)/src/stunnel: $(SRC)/configure
+	cd $(SRC)
+	./configure --with-ssl=$(SSL_BUILD) --disable-systemd --disable-libwrap \
+	  CPPFLAGS="-I$(SSL_BUILD)/include" \
+	  LDFLAGS="-L$(SSL_BUILD)/lib -Wl,-rpath,$(SSL_RPATH) -Wl,--disable-new-dtags"
+	make -j$$(nproc) ACLOCAL=: AUTOCONF=: AUTOMAKE=: AUTOHEADER=: MAKEINFO=:
+
+# Clone the pinned stunnel release from the fork mirror (was a release tarball; now
+# a shallow checkout of the stunnel-$(STUNNEL_VER) tag, which ships a generated
+# ./configure). Auth comes only from ../.secrets; see CLONE_RO. The autotools
+# mtime-skew from a git checkout is handled at compile time (see $(SRC)/src/stunnel).
+$(SRC)/configure:
+	@mkdir -p .build
+	rm -rf $(SRC)
+	$(RO_GUARD)
+	$(CLONE_RO) --depth 1 --branch stunnel-$(STUNNEL_VER) $(STUNNEL_REPO) $(SRC)
+
+clean:
+	rm -rf .build $(STAGE) selinux/tmp selinux/*.pp

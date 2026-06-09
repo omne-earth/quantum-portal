@@ -1,0 +1,140 @@
+policy_module(qp_nebula, 1.0.0)
+
+########################################
+# Declarations
+########################################
+#
+# Custom qp-nebula SELinux domain - the post-quantum overlay-mesh daemon (pqIX
+# ML-KEM-1024 handshake + ML-DSA-87 CA). Deliberately NOT openvpn_t or any stock
+# VPN type, so confinement tracks qp-nebula, not an OS policy release. Modeled on
+# qp_ssh.te / qp_stunnel.te but with a different footprint: nebula is ONE pure-Go
+# static binary (CGO_ENABLED=0) - NO bundled OpenSSL/liboqs (Go crypto/rand ->
+# getrandom), NO privsep, NO host-key gen, NO login/session spawn.
+# What it needs that the siblings do not: a tun device (/dev/net/tun) and rtnetlink
+# writes to raise the interface + assign the overlay address + install routes -
+# i.e. exactly ONE capability, CAP_NET_ADMIN. It also serves a LOCAL unix control
+# socket (/run/nebula.sock) for `nebula ctl`; there is no network control listener.
+
+# qp-nebula daemon. systemd (init_t) -> qp_nebula_t on exec of the binary.
+type qp_nebula_t;
+type qp_nebula_exec_t;
+init_daemon_domain(qp_nebula_t, qp_nebula_exec_t)
+
+# nebula-cert: the offline cert/CA tool (mint/inspect). Interactive/admin - runs in
+# the caller's own domain, like the qp-ssh client binaries. Shipping it is optional;
+# a hardened node may omit it.
+type qp_nebula_cert_exec_t;
+application_executable_file(qp_nebula_cert_exec_t)
+
+# Config + trust material under /usr/local/qp/etc/nebula: config.yml, ca.crt, and
+# the node's own host.crt. The private key gets a tighter type below.
+type qp_nebula_etc_t;
+files_config_file(qp_nebula_etc_t)
+
+# Node private key (host.key) - its own type so ONLY qp_nebula_t reads it.
+type qp_nebula_key_t;
+files_type(qp_nebula_key_t)
+
+# UDP listen/peer port (default 4242). Custom type labeled in %post via
+# `semanage port -a -t qp_nebula_port_t -p udp 4242` - not a base-policy port.
+type qp_nebula_port_t;
+corenet_port(qp_nebula_port_t)
+
+# Runtime dir + control socket under /run/nebula.sock (the unit's RuntimeDirectory).
+# nebula ctl talks to the daemon over this unix socket; there is no network listener.
+type qp_nebula_var_run_t;
+files_pid_file(qp_nebula_var_run_t)
+
+# The qp-nebula unit sets NoNewPrivileges (safe: ambient CAP_NET_ADMIN survives NNP,
+# there is no setuid privsep). Under NNP the kernel needs process2:nnp_transition for
+# init_t -> qp_nebula_t. Harmless if NNP is off. Same idiom as qp_stunnel.te.
+allow init_t qp_nebula_t:process2 { nnp_transition nosuid_transition };
+
+########################################
+# Process + capability - exactly ONE: CAP_NET_ADMIN
+########################################
+# CAP_NET_ADMIN is the SOLE capability: needed to create the tun (TUNSETIFF), bring
+# it up, set MTU, assign the overlay address, and install overlay routes (all via
+# rtnetlink). DELIBERATELY NOT granted, with the reason each is absent:
+#   net_bind_service - listen.port 4242 > 1024. If the operator moves it below 1024,
+#                      add net_bind_service here AND to the unit.
+#   net_raw          - Linux nebula uses rtnetlink, not raw sockets (AF_ROUTE/SOCK_RAW
+#                      is darwin/freebsd only - verified).
+#   setuid/setgid/sys_chroot - no privsep; systemd drops to the qp-nebula user.
+#   sys_module       - the tun device node pre-exists and the kernel autoloads tun.ko
+#                      on open; the daemon loads no module.
+#   mknod            - the "create /dev/net/tun" path only fires in a bare container;
+#                      on a host the node exists. Do NOT grant blindly.
+allow qp_nebula_t self:capability net_admin;
+allow qp_nebula_t self:process { fork signal signull getsched setsched setrlimit };
+allow qp_nebula_t self:fifo_file rw_fifo_file_perms;
+# Go runtime internal wakeup pipes / sema + the control socket's accept path.
+allow qp_nebula_t self:unix_stream_socket { create_stream_socket_perms listen accept };
+allow qp_nebula_t self:unix_dgram_socket create_socket_perms;
+
+########################################
+# tun device - create the tun, read/write packets on /dev/net/tun
+########################################
+# nebula opens /dev/net/tun O_RDWR and TUNSETIFFs its own (non-persistent) tun.
+allow qp_nebula_t self:tun_socket create;
+corenet_rw_tun_tap_dev(qp_nebula_t)
+
+########################################
+# Netlink - rtnetlink: link up / addr / route
+########################################
+# create_netlink_socket_perms already covers nlmsg_read + nlmsg_write;
+# programs routes with exactly this and nothing more.
+allow qp_nebula_t self:netlink_route_socket create_netlink_socket_perms;
+
+########################################
+# Network - UDP listener on qp_nebula_port_t (4242), peer traffic
+########################################
+allow qp_nebula_t self:udp_socket create_socket_perms;
+corenet_udp_bind_generic_node(qp_nebula_t)
+allow qp_nebula_t qp_nebula_port_t:udp_socket name_bind;
+# Peers live on arbitrary remote IPs/ports (NAT remaps the source port); UDP is
+# connectionless (no name_connect). The node side is granted explicitly:
+corenet_udp_sendrecv_generic_node(qp_nebula_t)
+
+########################################
+# Local control socket - /run/nebula.sock (RuntimeDirectory=nebula)
+########################################
+# The daemon creates + serves a unix stream socket for `nebula ctl`. No network
+# listener: remote control = forward the socket over qp-ssh. Manage the runtime dir
+# + the socket, and label what the daemon creates under /run via a name transition.
+manage_dirs_pattern(qp_nebula_t, qp_nebula_var_run_t, qp_nebula_var_run_t)
+manage_sock_files_pattern(qp_nebula_t, qp_nebula_var_run_t, qp_nebula_var_run_t)
+files_pid_filetrans(qp_nebula_t, qp_nebula_var_run_t, { dir sock_file })
+
+########################################
+# Files - config, certs, key; exec own binary
+########################################
+read_files_pattern(qp_nebula_t, qp_nebula_etc_t, qp_nebula_etc_t)
+list_dirs_pattern(qp_nebula_t, qp_nebula_etc_t, qp_nebula_etc_t)
+# Private key: read only, tighter type. Nothing else may read qp_nebula_key_t.
+read_files_pattern(qp_nebula_t, qp_nebula_key_t, qp_nebula_key_t)
+# Exec the daemon's own binary inside qp_nebula_t (no transition).
+can_exec(qp_nebula_t, qp_nebula_exec_t)
+
+########################################
+# Go runtime
+########################################
+# Go walks the cgroup tree at startup (cgroup-aware GOMAXPROCS / memory limits).
+fs_search_cgroup_dirs(qp_nebula_t)
+
+########################################
+# Plumbing - START MINIMAL; the permissive shakedown adds only what fires
+########################################
+# A CGO_ENABLED=0 Go binary is fully static (no ld.so / shared libs)
+# OMITTED; the permissive pass re-adds only any that actually fire for this binary.
+#
+# DNS: nebula's static_host_map/lighthouse CAN be hostnames. The sim is all-IP, so it
+# is omitted here; add `sysnet_dns_name_resolve(qp_nebula_t)` if a deployed config
+# uses hostnames. Logging: nebula -> stderr -> journald (no syslog).
+
+########################################
+# nebula-cert (offline admin tool) - runnable from a caller's domain
+########################################
+optional_policy(`
+    corecmd_executable_file(qp_nebula_cert_exec_t)
+')

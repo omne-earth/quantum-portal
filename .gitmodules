@@ -1,0 +1,4 @@
+[submodule "qp-nebula/nebula"]
+	path = qp-nebula/nebula
+	url = git@github.com:omne-earth/nebula.git
+	branch = edge

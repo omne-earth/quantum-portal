@@ -1,0 +1,19 @@
+# qp-stunnel file contexts. Applied by `restorecon` in %post. Everything lives
+# under the dedicated /usr/local/qp prefix, so labels never collide with the
+# distro's /usr/bin/stunnel, /etc/stunnel, etc.
+
+# Daemon binary -> qp_stunnel_t entry point.
+/usr/local/qp/sbin/qp-stunnel       --  gen_context(system_u:object_r:qp_stunnel_exec_t,s0)
+
+# Config.
+/usr/local/qp/etc/qp-stunnel\.conf  --  gen_context(system_u:object_r:qp_stunnel_etc_t,s0)
+
+# Provisioned server cert + private key (EJBCA-issued, dropped in out of band) —
+# tighter type so only qp_stunnel_t reads them.
+/usr/local/qp/etc/qp-stunnel\.crt      --  gen_context(system_u:object_r:qp_stunnel_cert_t,s0)
+/usr/local/qp/etc/qp-stunnel\.key      --  gen_context(system_u:object_r:qp_stunnel_cert_t,s0)
+
+# mTLS client-CA trust anchor (verify = 2). Provisioned out of band like the cert;
+# same type so qp_stunnel_t can read it to verify client chains. Literal path, more
+# specific than qp-ssh's /usr/local/qp/etc(/.*)? glob, so it wins.
+/usr/local/qp/etc/qp-stunnel-ca\.crt   --  gen_context(system_u:object_r:qp_stunnel_cert_t,s0)

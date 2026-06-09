@@ -1,0 +1,6 @@
+<!-- qp-nebula NAT-tree leaf segment AB (under R2b). Isolated pure-L2.
+     Static: R2b downlink 10.10.12.1, leaf3 10.10.12.11, leaf4 10.10.12.12. -->
+<network>
+  <name>tAB</name>
+  <bridge name='qpntrab' stp='on' delay='0'/>
+</network>

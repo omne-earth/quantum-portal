@@ -1,0 +1,16 @@
+<!--
+  Shared sim node network - a flat, ISOLATED L2 (no forward/NAT) that node VMs share
+  besides mgmt, e.g. as a real VM-to-VM underlay for overlay/tunnel tests: peer traffic
+  stays on this isolated segment, so any tunnel that forms is genuinely VM to VM across a
+  real network (not loopback/netns). Each node gets a 10.42.0.0/24 address by DHCP. Link
+  impairment (packet loss / latency) is netem/tc on the guest NIC.
+-->
+<network>
+  <name>node</name>
+  <bridge name='qpnulbr0' stp='on' delay='0'/>
+  <ip family='ipv4' address='10.42.0.1' netmask='255.255.255.0'>
+    <dhcp>
+      <range start='10.42.0.10' end='10.42.0.254'/>
+    </dhcp>
+  </ip>
+</network>

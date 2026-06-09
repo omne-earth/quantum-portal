@@ -1,0 +1,72 @@
+#!/bin/bash
+# qp-ssh deploy installer. Runs on the target host with bash +
+# systemctl as the only requirements — no make, no autoconf, no
+# compile toolchain. QP_PREFIX / QP_PORT / QP_PROGRAM_PREFIX below
+# are placeholders filled in at stage time (`make stage` in the
+# parent project), so this script is frozen to a specific build's
+# configuration.
+set -euo pipefail
+
+PREFIX="__QP_PREFIX__"
+PORT="__QP_PORT__"
+PROG="__QP_PROGRAM_PREFIX__"
+
+[ "$(id -u)" = 0 ] || { echo "install.sh must run as root" >&2; exit 1; }
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+[ -d "${HERE}/payload" ] || { echo "payload/ missing next to install.sh" >&2; exit 1; }
+
+echo "[1/4] payload -> ${PREFIX}"
+mkdir -p "${PREFIX}"
+cp -a "${HERE}/payload/." "${PREFIX}/"
+# OpenSSH privsep dir (baked-in default /var/empty). Targets like
+# stock Ubuntu don't ship this, so create it owned by root, 0755.
+mkdir -p -m 0755 /var/empty
+# SELinux: the bundle is copied from a staging dir (it lands in /tmp during
+# bootstrap), so the binaries carry the wrong label (user_tmp_t) and systemd
+# refuses to exec the daemon (203/EXEC "Permission denied"). Restore the default
+# contexts for the prefix (-> bin_t). No-op where SELinux tooling is absent.
+if command -v restorecon >/dev/null 2>&1; then
+  echo "      restoring SELinux contexts under ${PREFIX}"
+  restorecon -RF "${PREFIX}"
+fi
+
+echo "[2/4] systemd unit -> /etc/systemd/system/${PROG}sshd.service"
+cat > "/etc/systemd/system/${PROG}sshd.service" <<UNIT
+[Unit]
+Description=Post-Quantum SSH Daemon
+After=network.target
+
+[Service]
+ExecStart=${PREFIX}/sbin/${PROG}sshd -D -f ${PREFIX}/etc/${PROG}sshd_config
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+echo "[3/4] sshd_config -> ${PREFIX}/etc/${PROG}sshd_config"
+mkdir -p "${PREFIX}/etc"
+cat > "${PREFIX}/etc/${PROG}sshd_config" <<CONF
+Port ${PORT}
+AuthorizedKeysFile .qp-ssh/authorized_keys
+PasswordAuthentication no
+PermitRootLogin no
+Subsystem sftp ${PREFIX}/libexec/${PROG}sftp-server
+KexAlgorithms mlkem1024-sha384
+PubkeyAcceptedAlgorithms ssh-mldsa-87,ssh-falcon1024
+HostKeyAlgorithms ssh-mldsa-87,ssh-falcon1024
+HostKey ${PREFIX}/etc/qp-ssh_host_mldsa87_key
+HostKey ${PREFIX}/etc/qp-ssh_host_falcon1024_key
+CONF
+
+echo "[4/4] hostkeys + enable"
+[ -f "${PREFIX}/etc/qp-ssh_host_mldsa87_key" ] \
+  || "${PREFIX}/bin/${PROG}ssh-keygen" -t ssh-mldsa-87 -f "${PREFIX}/etc/qp-ssh_host_mldsa87_key" -N ""
+[ -f "${PREFIX}/etc/qp-ssh_host_falcon1024_key" ] \
+  || "${PREFIX}/bin/${PROG}ssh-keygen" -t ssh-falcon1024 -f "${PREFIX}/etc/qp-ssh_host_falcon1024_key" -N ""
+
+systemctl daemon-reload
+systemctl enable --now "${PROG}sshd.service"
+echo "  ${PROG}sshd listening on port ${PORT}"

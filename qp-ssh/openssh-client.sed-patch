@@ -1,0 +1,13 @@
+# openssh-client.sed-patch  (applied to ssh_config)
+#
+# Enable the OQS post-quantum host-key + public-key signature algorithms in the
+# client config by default, so `qp-ssh host` connects to a PQ qp-sshd with no
+# -o overrides. '+' augments the built-in algorithm lists rather than replacing
+# them, so classic SSH (ECDSA/Ed25519/RSA) still works. (mlkem1024 KEX is already
+# offered by default in the OQS client, so only the signature lists need this.)
+$a\
+\
+# qp-ssh: post-quantum defaults ('+' augments the classic algorithms)\
+Host *\
+HostKeyAlgorithms +ssh-mldsa-87,ssh-falcon1024\
+PubkeyAcceptedAlgorithms +ssh-mldsa-87,ssh-falcon1024

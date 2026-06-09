@@ -1,0 +1,6 @@
+<!-- qp-nebula NAT-tree leaf segment AA (under R2a). Isolated pure-L2.
+     Static: R2a downlink 10.10.11.1, leaf1 10.10.11.11, leaf2 10.10.11.12. -->
+<network>
+  <name>tAA</name>
+  <bridge name='qpntraa' stp='on' delay='0'/>
+</network>

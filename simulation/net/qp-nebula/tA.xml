@@ -1,0 +1,7 @@
+<!-- qp-nebula NAT-tree segment A (L1->L2). Isolated pure-L2 (no host IP, no DHCP) so
+     traffic is forced through the R1a router VM. Static addressing assigned by run-tree.sh:
+     R1a downlink 10.10.1.1, R2a 10.10.1.21, R2b 10.10.1.22. -->
+<network>
+  <name>tA</name>
+  <bridge name='qpntra' stp='on' delay='0'/>
+</network>

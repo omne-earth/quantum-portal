@@ -1,0 +1,6 @@
+# systemd-sysusers: unprivileged service user for qp-stunnel (the PQ-TLS mesh
+# terminator). Owns nothing on disk — it runs the daemon and reads the provisioned
+# cert/key. Shipping it lets rpm emit Provides: user(qp-stunnel)/group(qp-stunnel).
+#
+#Type Name        ID  GECOS                           Home dir  Shell
+u    qp-stunnel  -   "qp-stunnel PQ-TLS terminator"   /         /usr/sbin/nologin

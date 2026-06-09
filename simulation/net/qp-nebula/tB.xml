@@ -1,0 +1,6 @@
+<!-- qp-nebula NAT-tree segment B (L1->L2). Isolated pure-L2 through router R1b.
+     Static: R1b downlink 10.10.2.1, R2c 10.10.2.21, R2d 10.10.2.22. -->
+<network>
+  <name>tB</name>
+  <bridge name='qpntrb' stp='on' delay='0'/>
+</network>

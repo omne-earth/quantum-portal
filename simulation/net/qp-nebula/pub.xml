@@ -1,0 +1,22 @@
+<!--
+  qp-nebula sim public/transit network (relay reachability). ISOLATED L2 on
+  203.0.113.0/24: the relay/lighthouse sits here with a stable, "publicly" reachable
+  address. The per-node NAT networks (nat1/nat2) masquerade toward this
+  segment, so every node can reach the relay but NOT each other directly (their NAT
+  external mapping is the host pub IP with no inbound mapping = symmetric-NAT
+  behavior), forcing relayed pqIX.
+-->
+<network>
+  <name>pub</name>
+  <!-- routed (not isolated): lets the host forward the NAT nets' masqueraded traffic
+       to the relay here. No NAT on this segment - the relay is "public". -->
+  <forward mode='route'/>
+  <bridge name='qpnpubbr0' stp='on' delay='0'/>
+  <ip family='ipv4' address='203.0.113.1' netmask='255.255.255.0'>
+    <dhcp>
+      <!-- .2-.99 reserved for STATIC tree addrs (lighthouses, R1 uplinks); DHCP from
+           .100 up serves the relay-nat test's dynamically-discovered lighthouse. -->
+      <range start='203.0.113.100' end='203.0.113.254'/>
+    </dhcp>
+  </ip>
+</network>

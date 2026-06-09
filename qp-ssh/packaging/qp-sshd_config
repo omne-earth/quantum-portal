@@ -1,0 +1,13 @@
+# qp-sshd — post-quantum SSH daemon configuration.
+# Installed at /usr/local/qp/etc/qp-sshd_config as %config(noreplace), so
+# operator edits survive upgrades. Mirrors the config install.sh.in bakes.
+Port 1716
+AuthorizedKeysFile .qp-ssh/authorized_keys
+PasswordAuthentication no
+PermitRootLogin no
+Subsystem sftp /usr/local/qp/libexec/qp-sftp-server
+KexAlgorithms mlkem1024-sha384
+PubkeyAcceptedAlgorithms ssh-mldsa-87,ssh-falcon1024
+HostKeyAlgorithms ssh-mldsa-87,ssh-falcon1024
+HostKey /usr/local/qp/etc/qp-ssh_host_mldsa87_key
+HostKey /usr/local/qp/etc/qp-ssh_host_falcon1024_key

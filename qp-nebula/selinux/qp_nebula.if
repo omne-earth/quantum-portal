@@ -1,0 +1,44 @@
+## <summary>Post-quantum overlay mesh (qp-nebula) - qp_nebula_t interfaces.</summary>
+
+########################################
+## <summary>
+##	Execute the qp-nebula-cert tool in the caller's own domain - no
+##	transition. For an admin/provisioning domain that mints or inspects
+##	node certs. Use this instead of a raw `gen_require` for the exec type.
+## </summary>
+## <param name="domain">
+##	<summary>
+##	Domain allowed to execute qp-nebula-cert.
+##	</summary>
+## </param>
+#
+interface(`qp_nebula_run_cert',`
+	gen_require(`
+		type qp_nebula_cert_exec_t;
+	')
+
+	corecmd_search_bin($1)
+	can_exec($1, qp_nebula_cert_exec_t)
+')
+
+########################################
+## <summary>
+##	Read qp-nebula's config tree under /usr/local/qp/etc/nebula
+##	(config.yml, ca.crt, host.crt) - NOT the private key. For a domain that
+##	inspects the overlay config (e.g. a health probe reading the configured
+##	listen port).
+## </summary>
+## <param name="domain">
+##	<summary>
+##	Domain allowed to read the qp-nebula config files.
+##	</summary>
+## </param>
+#
+interface(`qp_nebula_read_config',`
+	gen_require(`
+		type qp_nebula_etc_t;
+	')
+
+	read_files_pattern($1, qp_nebula_etc_t, qp_nebula_etc_t)
+	list_dirs_pattern($1, qp_nebula_etc_t, qp_nebula_etc_t)
+')

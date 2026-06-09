@@ -1,0 +1,17 @@
+<!--
+  Shared sim management network. ISOLATED (no forward): host-to-guest control channel
+  only. The harness reaches each VM over this net to provision it (push artifacts, run
+  the in-VM check), and asserts results. libvirt dnsmasq serves DHCP on 192.168.140.0/24;
+  the harness discovers each guest's mgmt address via the qemu guest agent (virsh
+  domifaddr, agent source), matched on the 192.168.140 prefix, and SSHes in. No internet
+  here, and the node images are pre-built.
+-->
+<network>
+  <name>mgmt</name>
+  <bridge name='qpnmgmtbr0' stp='on' delay='0'/>
+  <ip family='ipv4' address='192.168.140.1' netmask='255.255.255.0'>
+    <dhcp>
+      <range start='192.168.140.10' end='192.168.140.254'/>
+    </dhcp>
+  </ip>
+</network>

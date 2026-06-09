@@ -1,0 +1,51 @@
+<!--
+  qp-nebula NAT-tree ROUTER domain (filled by run-tree.sh). Three NICs: mgmt (mgmt,
+  DHCP - harness control/SSH), uplink ({{NET_UP}}) toward the parent, downlink
+  ({{NET_DOWN}}) toward children. The uplink/downlink NICs carry fixed MACs so the guest
+  can identify them for static addressing; the router does ip_forward + masquerade
+  (downlink subnet -> uplink) so its children sit behind a real NAT. No vTPM, no nebula.
+  {{NODE}}=domain, {{DISK}}=CoW qcow2, {{NET_UP}}/{{NET_DOWN}}=nets, {{MAC_UP}}/{{MAC_DOWN}}=MACs.
+-->
+<domain type='kvm'>
+  <name>{{NODE}}</name>
+  <memory unit='MiB'>768</memory>
+  <currentMemory unit='MiB'>768</currentMemory>
+  <vcpu placement='static'>1</vcpu>
+  <os firmware='efi'>
+    <type arch='x86_64' machine='q35'>hvm</type>
+    <boot dev='hd'/>
+  </os>
+  <features><acpi/><apic/></features>
+  <cpu mode='host-passthrough' check='none'/>
+  <clock offset='utc'/>
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>destroy</on_crash>
+  <devices>
+    <emulator>/usr/bin/qemu-system-x86_64</emulator>
+    <disk type='file' device='disk'>
+      <driver name='qemu' type='qcow2'/>
+      <source file='{{DISK}}'/>
+      <target dev='vda' bus='virtio'/>
+    </disk>
+    <interface type='network'>
+      <source network='mgmt'/>
+      <model type='virtio'/>
+    </interface>
+    <interface type='network'>
+      <source network='{{NET_UP}}'/>
+      <mac address='{{MAC_UP}}'/>
+      <model type='virtio'/>
+    </interface>
+    <interface type='network'>
+      <source network='{{NET_DOWN}}'/>
+      <mac address='{{MAC_DOWN}}'/>
+      <model type='virtio'/>
+    </interface>
+    <serial type='pty'><target type='isa-serial' port='0'/></serial>
+    <console type='pty'><target type='serial' port='0'/></console>
+    <channel type='unix'><target type='virtio' name='org.qemu.guest_agent.0'/></channel>
+    <rng model='virtio'><backend model='random'>/dev/urandom</backend></rng>
+    <memballoon model='virtio'/>
+  </devices>
+</domain>

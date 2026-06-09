@@ -1,0 +1,46 @@
+## <summary>Post-quantum TLS terminator (qp-stunnel) — qp_stunnel_t mesh interfaces.</summary>
+
+########################################
+## <summary>
+##	Connect to the qp-stunnel mesh listener over TCP — the custom
+##	qp_stunnel_port_t (9443). For a domain that reaches the post-quantum
+##	edge on the operator overlay. Use this instead of a raw `gen_require`.
+## </summary>
+## <param name="domain">
+##	<summary>
+##	Domain allowed to connect to the qp-stunnel port.
+##	</summary>
+## </param>
+#
+interface(`qp_stunnel_tcp_connect',`
+	gen_require(`
+		type qp_stunnel_port_t;
+	')
+
+	allow $1 self:tcp_socket create_socket_perms;
+	allow $1 qp_stunnel_port_t:tcp_socket name_connect;
+	corenet_tcp_sendrecv_generic_if($1)
+	corenet_tcp_sendrecv_generic_node($1)
+')
+
+########################################
+## <summary>
+##	Be the plaintext backend qp-stunnel forwards decrypted traffic to:
+##	label this domain's listen port qp_stunnel_backend_port_t and allow
+##	qp_stunnel_t to name_connect to it. For the local service / container
+##	sitting behind the post-quantum terminator.
+## </summary>
+## <param name="domain">
+##	<summary>
+##	Backend domain whose listen port qp-stunnel may connect to.
+##	</summary>
+## </param>
+#
+interface(`qp_stunnel_backend',`
+	gen_require(`
+		type qp_stunnel_t, qp_stunnel_backend_port_t;
+	')
+
+	allow $1 qp_stunnel_backend_port_t:tcp_socket name_bind;
+	allow qp_stunnel_t qp_stunnel_backend_port_t:tcp_socket name_connect;
+')

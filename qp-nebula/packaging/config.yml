@@ -1,0 +1,42 @@
+# qp-nebula default config. The pki material (ca.crt / host.crt / host.key) is
+# provisioned out of band - the service stays stopped until it exists. Paths and the
+# listen port match the qp_nebula_t SELinux labels + qp_nebula_port_t (4242).
+pki:
+  ca: /usr/local/qp/etc/nebula/ca.crt
+  cert: /usr/local/qp/etc/nebula/host.crt
+  key: /usr/local/qp/etc/nebula/host.key
+
+# Lighthouses + static host map are provisioned per node; left empty here.
+static_host_map: {}
+lighthouse:
+  am_lighthouse: false
+  hosts: []
+
+listen:
+  host: 0.0.0.0
+  port: 4242
+
+# A named device keeps the tun stable for the SELinux/netlink path.
+tun:
+  dev: nebula1
+  mtu: 1300
+
+# Local control socket for `nebula ctl` (version / list-hostmap / print-tunnel / ...).
+# No network listener; remote admin = forward this socket over qp-ssh. 0660 + the
+# qp-nebula group, so an operator in that group can drive it locally.
+control:
+  socket: /run/nebula/nebula.sock
+  mode: "0660"
+  group: qp-nebula
+
+# Closed by default - the operator opens exactly the overlay flows they need.
+firewall:
+  outbound:
+    - port: any
+      proto: any
+      host: any
+  inbound: []
+
+logging:
+  level: info
+  format: text

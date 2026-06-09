@@ -1,0 +1,138 @@
+# Makefile.publish — release orchestrator for the qp-* suite.
+#
+# Each component (qp-ssh, and qp-stunnel when it lands) is self-contained in its
+# own folder with a Makefile.<component> that owns its build / package / install /
+# smoke / test against its own packaging/ + selinux/ + smoke/. This top file ONLY
+# fans the generic verbs out across components, deep-referencing each component
+# Makefile WITHOUT changing directory (`-f qp-ssh/Makefile`, not `-C`) so
+# .env's $(CURDIR)-relative cert/artifact paths resolve from the repo root. The
+# one shared fedora toolbox lives in Makefile.commons (built once for the suite).
+#
+#   make -f Makefile.publish build     # compile + build every component
+#   make -f Makefile.publish package   # package + sign every component's rpm
+#   make -f Makefile.publish install   # deploy + smoke every component
+#   make -f Makefile.publish link      # publish + link every component  (DEFAULT)
+#
+# Per-component verbs are also exposed, e.g. `make -f Makefile.publish install-qpssh`.
+
+.ONESHELL:
+SHELL          := /bin/bash
+.SHELLFLAGS    := -euo pipefail -c
+.DEFAULT_GOAL  := link
+
+include .env
+BUILD_DIR := $(CURDIR)/.build
+include Makefile.commons           # shared toolbox only (built once for the suite)
+
+# -----------------------------------------------------------------------------
+# Components — each maps to a Makefile.<component>.
+# -----------------------------------------------------------------------------
+QPSIM  := $(MAKE) -f simulation/Makefile
+QPSSH  := $(MAKE) -f qp-ssh/Makefile
+QPSTUN := $(MAKE) -f qp-stunnel/Makefile
+QPNEB  := $(MAKE) -f qp-nebula/Makefile
+
+# -----------------------------------------------------------------------------
+# Suite-wide per-run logs: ONE timestamped file under .logs/ (gitignored) for the
+# whole fan-out, fixed at parse time. smoke/stress hand each component its
+# log path via a LOG_FILE=/STRESS_LOG= override, so every component's `@$(LOG)`/
+# `@$(SLOG)` tees into the same suite file (prefix drops the component: smoke-qp-<ts>).
+# -----------------------------------------------------------------------------
+TS         := $(shell date -u +%Y%m%dT%H%M%SZ)
+SMOKE_LOG  := .logs/smoke-qp-$(TS).log
+STRESS_LOG := .logs/stress-qp-$(TS).log
+
+.PHONY: build-qpssh package-qpssh install-qpssh uninstall-qpssh publish-qpssh link-qpssh clean-qpssh smoke-qpssh stress-qpssh \
+        build-qpstunnel package-qpstunnel install-qpstunnel uninstall-qpstunnel publish-qpstunnel link-qpstunnel clean-qpstunnel smoke-qpstunnel stress-qpstunnel \
+        build-qpnebula package-qpnebula install-qpnebula uninstall-qpnebula publish-qpnebula link-qpnebula clean-qpnebula smoke-qpnebula stress-qpnebula \
+        purge-simulation purge-build purge-distribution purge-logs purge-coverage \
+        build package install uninstall publish link clean purge smoke stress
+
+# ── Per-component verbs: deep-reference the component Makefile ────────────────
+build-qpssh:
+	$(QPSSH) build
+package-qpssh:
+	$(QPSSH) package
+install-qpssh:
+	$(QPSSH) install
+uninstall-qpssh:
+	$(QPSSH) uninstall
+publish-qpssh:
+	$(QPSSH) publish
+link-qpssh:
+	$(QPSSH) link
+clean-qpssh:
+	$(QPSSH) clean
+smoke-qpssh:
+	$(QPSSH) smoke LOG_FILE=$(SMOKE_LOG)
+stress-qpssh:
+	$(QPSSH) stress LOG_FILE=$(STRESS_LOG)
+
+build-qpstunnel:
+	$(QPSTUN) build
+package-qpstunnel:
+	$(QPSTUN) package
+install-qpstunnel:
+	$(QPSTUN) install
+uninstall-qpstunnel:
+	$(QPSTUN) uninstall
+publish-qpstunnel:
+	$(QPSTUN) publish
+link-qpstunnel:
+	$(QPSTUN) link
+clean-qpstunnel:
+	$(QPSTUN) clean
+smoke-qpstunnel:
+	$(QPSTUN) smoke LOG_FILE=$(SMOKE_LOG)
+stress-qpstunnel:
+	$(QPSTUN) stress LOG_FILE=$(STRESS_LOG)
+
+build-qpnebula:
+	$(QPNEB) build
+package-qpnebula:
+	$(QPNEB) package
+install-qpnebula:
+	$(QPNEB) install
+uninstall-qpnebula:
+	$(QPNEB) uninstall
+publish-qpnebula:
+	$(QPNEB) publish
+link-qpnebula:
+	$(QPNEB) link
+clean-qpnebula:
+	$(QPNEB) clean
+smoke-qpnebula:
+	$(QPNEB) smoke LOG_FILE=$(SMOKE_LOG)
+stress-qpnebula:
+	$(QPNEB) stress STRESS_LOG=$(STRESS_LOG)
+
+purge-simulation:
+	$(QPSIM) purge
+
+purge-build:
+	rm -rf .build .qp .submodules
+
+purge-distribution:
+	rm -rf deploy dist
+
+purge-logs:
+	rm -rf .logs
+
+purge-coverage:
+	rm -rf .coverage
+
+# ── Generic verbs fan out across every component that implements them ─────────
+# Order matters where components couple: qp-stunnel builds against / requires qp-ssh, so
+# build/install go qp-ssh first and uninstall tears down qp-stunnel first (reverse).
+# qp-nebula is standalone (no qp-ssh dep), so it slots in last for the rpm verbs and
+# tears down first. All three implement the full rpm + toolbox verb set.
+build:     build-qpssh build-qpstunnel build-qpnebula
+package:   package-qpssh package-qpstunnel package-qpnebula
+install:   install-qpssh install-qpstunnel install-qpnebula
+uninstall: uninstall-qpnebula uninstall-qpstunnel uninstall-qpssh
+publish:   publish-qpssh publish-qpstunnel publish-qpnebula
+link:      link-qpssh link-qpstunnel link-qpnebula
+clean:     clean-qpssh clean-qpstunnel clean-qpnebula
+purge:     clean purge-simulation purge-build purge-distribution purge-logs purge-coverage
+smoke:     smoke-qpssh smoke-qpstunnel smoke-qpnebula
+stress:    stress-qpssh stress-qpstunnel stress-qpnebula

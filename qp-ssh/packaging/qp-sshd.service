@@ -1,0 +1,18 @@
+[Unit]
+Description=Post-Quantum SSH daemon (qp-sshd)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/qp/sbin/qp-sshd -D -f /usr/local/qp/etc/qp-sshd_config
+Restart=always
+RestartSec=5
+
+# Defense-in-depth at the systemd layer: bound the capability set to exactly what
+# sshd privsep needs — this mirrors the SELinux qp_sshd_t cap set and, notably,
+# EXCLUDES CAP_SYS_ADMIN. (No NoNewPrivileges — it breaks setuid privsep. No
+# ProtectSystem/PrivateTmp — interactive sessions need the live filesystem.)
+CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_SETPCAP CAP_NET_BIND_SERVICE CAP_SYS_CHROOT CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_KILL CAP_SYS_RESOURCE CAP_SYS_TTY_CONFIG CAP_AUDIT_WRITE CAP_FSETID
+
+[Install]
+WantedBy=multi-user.target

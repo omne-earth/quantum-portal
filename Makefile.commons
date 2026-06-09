@@ -1,0 +1,55 @@
+# Makefile.commons
+#
+# Shared machinery for every component's release path: ONLY the fedora toolbox
+# build container (the one shared build env for the whole qp-* suite — rpm-build /
+# selinux-policy-devel live there). Included by the Makefile.publish orchestrator
+# and each component's Makefile.<component>; defines variables + targets only
+# (shell directives stay with the including Makefile). Per-component smoke/test
+# live in that component's Makefile, NOT here. TOOLBOX_*, BUILD_DIR, QP_* from .env.
+#
+# The rpm path REQUIRES the fedora toolbox (rpm-build lives there), so the
+# container is always built from toolbox/Containerfile.fedora here — independent
+# of the top Makefile's OS-selectable build.
+
+BUILD_DIR  ?= $(CURDIR)/.build
+TOOLBOX_OK := $(BUILD_DIR)/.toolbox-sentinel
+
+# Toolbox prefix. Auto-de-escalates to the calling user under sudo (toolbox
+# containers are per-user rootless podman). Use like: `$(T) cc ...`.
+T := bash -c '\
+  user="$${SUDO_USER:-$$(logname 2>/dev/null)}"; \
+  if [ "$$(id -u)" = "0" ] && [ -n "$$user" ] && [ "$$user" != "root" ]; then \
+    sudo -u "$$user" toolbox run --container $(TOOLBOX_NAME) -- "$$@"; \
+  else \
+    toolbox run --container $(TOOLBOX_NAME) -- "$$@"; \
+  fi' --
+
+.PHONY: toolbox toolbox-purge
+
+# =============================================================================
+# TOOLBOX (fedora — has rpm-build/selinux-policy-devel/systemd-rpm-macros)
+# =============================================================================
+
+toolbox: $(TOOLBOX_OK)
+
+$(TOOLBOX_OK): toolbox/Containerfile.fedora
+	@mkdir -p $(BUILD_DIR)
+	@echo "[toolbox] building image $(TOOLBOX_IMAGE) (fedora)"
+	podman build -f toolbox/Containerfile.fedora -t $(TOOLBOX_IMAGE) toolbox/
+	@echo "[toolbox] creating container $(TOOLBOX_NAME)"
+	toolbox create --image $(TOOLBOX_IMAGE) $(TOOLBOX_NAME) 2>/dev/null \
+	  || echo "  toolbox $(TOOLBOX_NAME) already exists"
+	# Warm up: toolbox inits the container on first exec, which can flake right
+	# after create. Retry so the sentinel only lands once it truly runs.
+	@echo "[toolbox] warming up $(TOOLBOX_NAME)"
+	for i in 1 2 3 4 5; do
+	  toolbox run --container $(TOOLBOX_NAME) -- true && break
+	  echo "  warm-up attempt $$i failed; retrying in 2s"; sleep 2
+	done
+	toolbox run --container $(TOOLBOX_NAME) -- true
+	touch $@
+
+toolbox-purge:
+	-toolbox rm -f $(TOOLBOX_NAME) 2>/dev/null
+	-podman rmi $(TOOLBOX_IMAGE) 2>/dev/null
+	rm -f $(TOOLBOX_OK)

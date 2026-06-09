@@ -1,0 +1,34 @@
+[Unit]
+Description=Post-Quantum TLS terminator for the operator mesh (qp-stunnel)
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/qp/sbin/qp-stunnel /usr/local/qp/etc/qp-stunnel.conf
+User=qp-stunnel
+Group=qp-stunnel
+Restart=always
+RestartSec=5
+
+# Hardening — qp-stunnel is a small, network-facing terminator that needs only its
+# config, the provisioned cert/key, the bundled OpenSSL, and two sockets. Lock it
+# down to match the qp_stunnel_t SELinux domain (defense in depth). It binds 9443
+# (>1024) as a non-root user, so it needs NO capabilities at all — unlike qp-sshd,
+# there is no setuid privsep here, so NoNewPrivileges is safe.
+CapabilityBoundingSet=
+AmbientCapabilities=
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

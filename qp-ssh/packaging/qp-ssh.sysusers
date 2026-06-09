@@ -1,0 +1,8 @@
+# systemd-sysusers: privilege-separation user for qp-sshd (OpenSSH privsep).
+#
+# Stock hosts with openssh-server already have 'sshd'; sysusers is idempotent
+# (no-op if present). Shipping it lets qp-ssh work on minimal hosts and makes
+# rpm's generator emit Provides: user(sshd)/group(sshd) for any auto-Requires.
+#
+#Type Name  ID  GECOS                       Home dir    Shell
+u    sshd  -   "Privilege-separated SSH"   /var/empty  /usr/sbin/nologin

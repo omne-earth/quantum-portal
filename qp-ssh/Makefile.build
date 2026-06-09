@@ -1,0 +1,153 @@
+SHELL := bash
+.ONESHELL:
+.SHELLFLAGS := -ueo pipefail -c
+
+include ../.env
+
+# Read-only git credentials for the fork mirrors (openssh, liboqs, ...)
+# come ONLY from ../.secrets (GIT_RO_USERNAME / GIT_RO_PASSWORD), never from
+# ~/.netrc. Optional include so non-clone targets (clean, ...) still work without
+# it; the clone recipes guard on the creds and fail fast if .secrets is missing.
+-include ../.secrets
+export GIT_RO_USERNAME GIT_RO_PASSWORD
+
+# CLONE_RO clones a git mirror, authenticating with a transient HTTP Basic-auth
+# header built from .secrets AT RECIPE TIME via a subshell ($$(...), not make
+# expansion). So the credentials never appear in make's echoed recipe, the build
+# log, or the cloned repo's .git/config — and never come from netrc. credential.helper=
+# also disables any ambient credential helper. RO_GUARD fails fast when creds are absent.
+RO_GUARD = [ -n "$${GIT_RO_USERNAME:-}" ] && [ -n "$${GIT_RO_PASSWORD:-}" ] || { echo "ERROR: git read-only git creds missing - set GIT_RO_USERNAME/GIT_RO_PASSWORD in ../.secrets (never ~/.netrc)"; exit 1; }
+CLONE_RO = git -c credential.helper= -c http.extraHeader="Authorization: Basic $$(printf '%s:%s' "$${GIT_RO_USERNAME}" "$${GIT_RO_PASSWORD}" | base64 | tr -d '\n')" clone
+
+SENTINEL := $(CURDIR)/.sentinel
+
+# Build with the real deploy prefix (QP_PREFIX from ../.env, e.g. /usr/local/qp)
+# so the absolute paths baked into the binaries — libexecdir/sshd-session,
+# sysconfdir, ... — are correct on the TARGET, not on this build tree. Install
+# into a local DESTDIR staging root (no root needed); the build target then
+# flattens DESTROOT+QP_PREFIX into .qp, which `make stage` rsyncs exactly as
+# before.
+# $(CURDIR), not $(PWD): under recursive make $(PWD) differs between this Makefile
+# and the install sub-make (qp-ssh vs the parent dir), which would split the
+# DESTDIR install and the flatten into two trees. $(CURDIR) is stable.
+DESTROOT := $(CURDIR)/.qp-root
+DESTPFX  := $(DESTROOT)$(QP_PREFIX)
+
+.PHONY: clean build
+
+# ── Wipe this suite's build state so `build` recompiles from scratch ──
+# .build = cloned+compiled sources, .sentinel = stage markers, .qp-root =
+# DESTDIR staging, $(PWD)/.qp = the flattened install tree (at the parent dir
+# under recursive make, same place `build` writes it).
+clean:
+	rm -rf $(BUILD_DIR) $(SENTINEL) $(DESTROOT) $(PWD)/.qp selinux/tmp selinux/*.pp
+
+# ── Client (runs in toolbox) ──────────────────────────────────
+build:
+	# Recurse explicitly into THIS makefile: the default makefile in qp-ssh/ is the
+	# component Makefile (post the build->Makefile.build / component->Makefile
+	# rename), which has no .openssh target and guards on .env. Without -f the
+	# recursion would fall through to it and abort.
+	$(MAKE) -f Makefile.build $(SENTINEL)/.openssh
+	# Flatten the DESTDIR-staged tree (DESTROOT + QP_PREFIX) into .qp for stage.
+	rm -rf $(PWD)/.qp
+	mkdir -p $(PWD)/.qp
+	cp -a $(DESTPFX)/. $(PWD)/.qp/
+	@printf '%s\n%s\n' \
+	    'export PATH="$(PWD)/.qp/bin:$(PWD)/.qp/sbin:$$PATH"' \
+	    'export MANPATH="$(PWD)/.qp/share/man:$$MANPATH"' \
+	    > $(PWD)/.qp/activate
+	@echo
+	@echo "  qp-ssh built. Activate from this shell:"
+	@echo "    source $(PWD)/.qp/activate"
+	@echo
+
+# ── Build OpenSSL ─────────────────────────────────────────────
+.openssl: $(SENTINEL)/.openssl
+$(SENTINEL)/.openssl:
+	rm -rf $(BUILD_DIR)/openssl $(DESTROOT)
+	mkdir -p $(BUILD_DIR)
+	$(RO_GUARD)
+	$(CLONE_RO) --depth 1 --branch $(OPENSSL_VER) $(OPENSSL_REPO) $(BUILD_DIR)/openssl
+	cd $(BUILD_DIR)/openssl
+	./Configure \
+	  --prefix=$(QP_PREFIX) \
+	  --openssldir=$(QP_PREFIX)/ssl \
+	  --libdir=lib \
+	  --with-rand-seed=devrandom \
+	  no-docs \
+	  -Wl,-rpath,$(QP_PREFIX)/lib -Wl,--disable-new-dtags
+	# rpath the bundled libs into the openssl CLI + .so so /usr/local/qp/bin/openssl
+	# loads /usr/local/qp/lib/libcrypto, not the older system one (DT_RPATH, like
+	# the openssh tools). Caught by test-binaries.
+	make -j$$(nproc)
+	# install_sw = libs+bins+headers; install_ssldirs ships $(QP_PREFIX)/ssl/openssl.cnf
+	# (without it the CLI's config-dependent commands — req/ca/x509, hence c_rehash —
+	# fail "Can't open .../ssl/openssl.cnf"). Caught by test-c_rehash.
+	make install_sw install_ssldirs DESTDIR=$(DESTROOT)
+	mkdir -p $(SENTINEL)
+	touch $@
+
+# ── Build liboqs ──────────────────────────────────────────────
+.liboqs: $(SENTINEL)/.liboqs
+$(SENTINEL)/.liboqs: $(SENTINEL)/.openssl
+	rm -rf $(BUILD_DIR)/liboqs
+	mkdir -p $(BUILD_DIR)
+	$(RO_GUARD)
+	$(CLONE_RO) --depth 1 --branch $(LIBOQS_VER) $(LIBOQS_REPO) $(BUILD_DIR)/liboqs
+	cd $(BUILD_DIR)/liboqs
+	mkdir -p build
+	cd build
+	cmake -GNinja \
+	  -DCMAKE_INSTALL_PREFIX=$(QP_PREFIX) \
+	  -DCMAKE_INSTALL_LIBDIR=lib \
+	  -DCMAKE_BUILD_TYPE=Release \
+	  -DOQS_BUILD_ONLY_LIB=ON \
+	  -DOPENSSL_ROOT_DIR=$(DESTPFX) \
+	  -DCMAKE_INSTALL_RPATH=$(QP_PREFIX)/lib \
+	  ..
+	ninja
+	DESTDIR=$(DESTROOT) ninja install
+	mkdir -p $(SENTINEL)
+	touch $@
+
+# ── Build openssh with OQS ────────────────────────────────────
+.openssh: $(SENTINEL)/.openssh
+$(SENTINEL)/.openssh: $(SENTINEL)/.liboqs
+	rm -rf $(BUILD_DIR)/openssh-oqs
+	$(RO_GUARD)
+	$(CLONE_RO) --depth 1 $(OPENSSH_REPO) $(BUILD_DIR)/openssh-oqs
+	sed -i -f openssh-prefix.sed-patch $(BUILD_DIR)/openssh-oqs/Makefile.in
+	sed -i -f openssh-usage.sed-patch $(BUILD_DIR)/openssh-oqs/*.c
+	sed -i -f openssh-paths.sed-patch $(BUILD_DIR)/openssh-oqs/pathnames.h $(BUILD_DIR)/openssh-oqs/*.c
+	# enable the OQS host-key/pubkey algorithms in the client config so
+	# `qp-ssh host` works against a PQ qp-sshd without -o overrides.
+	sed -i -f openssh-client.sed-patch $(BUILD_DIR)/openssh-oqs/ssh_config
+	sed -i '/^AC_OUTPUT/i test "x$$program_prefix" = xNONE && program_prefix=\nAC_SUBST([program_prefix])' $(BUILD_DIR)/openssh-oqs/configure.ac
+	cd $(BUILD_DIR)/openssh-oqs
+	autoreconf -fi
+	# configure RUNS link-and-run tests (e.g. the OpenSSL header/library match
+	# check). Since the rpath is now the not-yet-existent target dir, point the
+	# loader at the staging libs for build time only — this is NOT baked into the
+	# binaries (rpath = $(QP_PREFIX)/lib stays the runtime path).
+	export LD_LIBRARY_PATH=$(DESTPFX)/lib
+	./configure \
+	  --prefix=$(QP_PREFIX) \
+	  --with-liboqs-dir=$(DESTPFX) \
+	  --with-ssl-dir=$(DESTPFX) \
+	  --with-selinux \
+	  --program-prefix=$(QP_PROGRAM_PREFIX) \
+	  LDFLAGS="-Wl,-rpath,$(QP_PREFIX)/lib -Wl,--disable-new-dtags -L$(DESTPFX)/lib"
+	# rpath the TARGET prefix ($(QP_PREFIX)/lib = /usr/local/qp/lib), not the
+	# build staging dir ($(DESTPFX)/lib) — else the deployed binaries look for the
+	# bundled libcrypto/liboqs in the build tree and fail (rpm OR make bootstrap).
+	# -L still points at the staging libs for link time. --disable-new-dtags emits
+	# DT_RPATH (searched transitively) so liboqs's own libcrypto resolves too.
+	make -j$$(nproc)
+	# openssh's `make install` skips ssh_config/sshd_config if they already exist
+	# in DESTDIR (stale on an incremental rebuild), which would drop our client
+	# algorithm patch -- force a fresh install of them.
+	rm -f $(DESTPFX)/etc/ssh_config $(DESTPFX)/etc/sshd_config
+	make install DESTDIR=$(DESTROOT)
+	mkdir -p $(SENTINEL)
+	touch $@

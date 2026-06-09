@@ -1,0 +1,28 @@
+FROM quay.io/toolbx/ubuntu-toolbox:24.04
+
+# OpenSSH's `make install` mkdir -p /var/empty (privsep dir, default
+# path baked into the binary). fedora-toolbox ships /var/empty already;
+# raw ubuntu-toolbox doesn't, so pre-create it as root or the build
+# user (UID 1000) hits "Permission denied" on /var.
+RUN mkdir -p -m 0755 /var/empty
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      make \
+      curl \
+      jq \
+      python3 \
+      cmake \
+      ninja-build \
+      gcc \
+      g++ \
+      git \
+      autoconf \
+      automake \
+      libtool \
+      perl \
+      zlib1g-dev \
+      libssl-dev \
+      libpam0g-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*

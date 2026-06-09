@@ -1,0 +1,121 @@
+policy_module(qp_stunnel, 1.0.0)
+
+########################################
+# Declarations
+########################################
+#
+# Custom qp-stunnel SELinux domain — the post-quantum TLS terminator for the
+# operator mesh. Deliberately NOT the distro's stunnel_t, so confinement tracks
+# qp-stunnel rather than the OS stunnel policy release. Modeled on qp_ssh.te, but
+# far smaller: NO privsep, NO host keys, NO session spawn, and — because it binds
+# :9443 (>1024) as the unprivileged qp-stunnel user — NO capabilities at all. It
+# accepts a PQ-TLS connection, reads its cert/config + qp-ssh's bundled OpenSSL,
+# and forwards the decrypted plaintext to one labeled loopback backend port.
+
+# qp-stunnel daemon. systemd (init_t) -> qp_stunnel_t on exec of the binary.
+type qp_stunnel_t;
+type qp_stunnel_exec_t;
+init_daemon_domain(qp_stunnel_t, qp_stunnel_exec_t)
+
+# Config (/usr/local/qp/etc/qp-stunnel.conf).
+type qp_stunnel_etc_t;
+files_config_file(qp_stunnel_etc_t)
+
+# Server identity — the EJBCA-issued ML-DSA-87 leaf cert + its private key,
+# provisioned out of band. Its own type so ONLY qp_stunnel_t reads the key.
+type qp_stunnel_cert_t;
+files_type(qp_stunnel_cert_t)
+
+# TCP listen port 9443 (labeled via `semanage port -a -t qp_stunnel_port_t` in
+# %post) — a custom type, not the base policy's generic ports.
+type qp_stunnel_port_t;
+corenet_port(qp_stunnel_port_t)
+
+# The plaintext backend qp-stunnel forwards to. A dedicated port type the operator
+# / operator labels onto the real backend port (`semanage port -a -t
+# qp_stunnel_backend_port_t -p tcp <port>`) — so the terminator can connect to
+# exactly that one port and nothing else, instead of leaning on a broad
+# corenet_tcp_connect_*_port grant.
+type qp_stunnel_backend_port_t;
+corenet_port(qp_stunnel_backend_port_t)
+
+# The qp-stunnel unit sets NoNewPrivileges; under NNP the kernel needs
+# process2:nnp_transition for init_t -> qp_stunnel_t. Harmless if NNP is off.
+allow init_t qp_stunnel_t:process2 { nnp_transition nosuid_transition };
+
+########################################
+# Process — NO capabilities (binds 9443 as a non-root user, no privsep)
+########################################
+allow qp_stunnel_t self:process { signal signull getsched setsched setrlimit };
+allow qp_stunnel_t self:fifo_file rw_fifo_file_perms;
+# stunnel's internal signal pipe / inter-thread wakeup is a socketpair.
+allow qp_stunnel_t self:unix_stream_socket create_stream_socket_perms;
+allow qp_stunnel_t self:unix_dgram_socket create_socket_perms;
+allow qp_stunnel_t self:netlink_route_socket r_netlink_socket_perms;
+
+########################################
+# Network — listen on qp_stunnel_port_t (9443), forward to the labeled backend
+########################################
+# create_stream_socket_perms covers create/bind/connect/listen/accept/rw.
+allow qp_stunnel_t self:tcp_socket create_stream_socket_perms;
+allow qp_stunnel_t qp_stunnel_port_t:tcp_socket name_bind;
+allow qp_stunnel_t qp_stunnel_backend_port_t:tcp_socket name_connect;
+corenet_all_recvfrom_unlabeled(qp_stunnel_t)
+corenet_tcp_sendrecv_generic_if(qp_stunnel_t)
+corenet_tcp_sendrecv_generic_node(qp_stunnel_t)
+corenet_tcp_bind_generic_node(qp_stunnel_t)
+
+########################################
+# Files — config, cert/key, the bundled OpenSSL (qp-ssh's libs)
+########################################
+read_files_pattern(qp_stunnel_t, qp_stunnel_etc_t, qp_stunnel_etc_t)
+list_dirs_pattern(qp_stunnel_t, qp_stunnel_etc_t, qp_stunnel_etc_t)
+
+read_files_pattern(qp_stunnel_t, qp_stunnel_cert_t, qp_stunnel_cert_t)
+
+# qp-stunnel's config + cert/key live under /usr/local/qp/etc, a directory owned
+# (labeled qp_sshd_etc_t) by the qp-ssh rpm. Traversing to its OWN files there
+# needs `search` on that dir — and ONLY search: no read of qp-ssh's sshd_config /
+# host-key tree. (Verified by the permissive AVC pass: search was the sole perm
+# attempted on qp_sshd_etc_t.) Inline gen_require — qp_ssh's .if isn't on the
+# module build path; this matches the cross-module lib style below.
+optional_policy(`
+    gen_require(`
+        type qp_sshd_etc_t;
+    ')
+    allow qp_stunnel_t qp_sshd_etc_t:dir search;
+')
+
+# Load qp-ssh's bundled OpenSSL (.so under /usr/local/qp/lib, type qp_ssh_lib_t —
+# declared by the qp_ssh module, a hard rpm Requires). Read + map + execute, NO
+# execmod: the bundled libcrypto/libssl are PIC (no TEXTREL). optional_policy +
+# gen_require (house style for cross-module type refs) so this module still
+# compiles standalone.
+optional_policy(`
+    gen_require(`
+        type qp_ssh_lib_t;
+    ')
+    allow qp_stunnel_t qp_ssh_lib_t:dir list_dir_perms;
+    allow qp_stunnel_t qp_ssh_lib_t:file { read getattr open map execute execute_no_trans };
+')
+
+# Exec its own binary (no transition).
+can_exec(qp_stunnel_t, qp_stunnel_exec_t)
+
+########################################
+# Entropy — stock entropy sources
+########################################
+dev_read_urand(qp_stunnel_t)
+dev_read_rand(qp_stunnel_t)
+
+########################################
+# Standard daemon plumbing
+########################################
+libs_use_ld_so(qp_stunnel_t)
+libs_use_shared_libs(qp_stunnel_t)
+miscfiles_read_localization(qp_stunnel_t)
+kernel_read_system_state(qp_stunnel_t)
+kernel_read_network_state(qp_stunnel_t)
+# stunnel writes its startup banner to syslog (/dev/log) before backgrounding to
+# stderr under `foreground = yes`.
+logging_send_syslog_msg(qp_stunnel_t)

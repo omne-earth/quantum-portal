@@ -1,0 +1,20 @@
+# qp-nebula file contexts. Applied by `restorecon -RF /usr/local/qp` in %post.
+# Everything lives under the dedicated /usr/local/qp prefix, so labels never collide
+# with the distro's /usr/bin/nebula etc.
+
+# Daemon binary -> qp_nebula_t entry point.
+/usr/local/qp/sbin/qp-nebula            --  gen_context(system_u:object_r:qp_nebula_exec_t,s0)
+
+# Offline cert/CA tool - runs in the caller's domain (optional on a node).
+/usr/local/qp/bin/qp-nebula-cert        --  gen_context(system_u:object_r:qp_nebula_cert_exec_t,s0)
+
+# Config + trust material (config.yml, ca.crt, host.crt).
+/usr/local/qp/etc/nebula(/.*)?              gen_context(system_u:object_r:qp_nebula_etc_t,s0)
+
+# Node private key(s) - tighter type. More specific than the etc glob above, so it
+# wins; any *.key under the nebula dir is the daemon-only secret.
+/usr/local/qp/etc/nebula/.*\.key        --  gen_context(system_u:object_r:qp_nebula_key_t,s0)
+
+# Runtime dir for the control socket (systemd RuntimeDirectory=nebula creates it; this
+# pins the label for a manual restorecon / non-systemd start).
+/run/nebula(/.*)?                           gen_context(system_u:object_r:qp_nebula_var_run_t,s0)

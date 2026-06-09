@@ -1,0 +1,34 @@
+# qp-ssh file contexts. Applied by `restorecon -RF /usr/local/qp` in %post.
+# Everything lives under the dedicated /usr/local/qp prefix, so labels never
+# collide with the distro's /usr/sbin/sshd, /etc/ssh, etc.
+
+# Daemon binary -> qp_sshd_t entry point.
+/usr/local/qp/sbin/qp-sshd          --  gen_context(system_u:object_r:qp_sshd_exec_t,s0)
+
+# Client + agent binaries.
+/usr/local/qp/bin/qp-ssh            --  gen_context(system_u:object_r:qp_ssh_exec_t,s0)
+/usr/local/qp/bin/qp-scp            --  gen_context(system_u:object_r:qp_ssh_exec_t,s0)
+/usr/local/qp/bin/qp-sftp           --  gen_context(system_u:object_r:qp_ssh_exec_t,s0)
+/usr/local/qp/bin/qp-ssh-add        --  gen_context(system_u:object_r:qp_ssh_exec_t,s0)
+/usr/local/qp/bin/qp-ssh-agent      --  gen_context(system_u:object_r:qp_ssh_exec_t,s0)
+/usr/local/qp/bin/qp-ssh-keygen     --  gen_context(system_u:object_r:qp_ssh_exec_t,s0)
+/usr/local/qp/bin/qp-ssh-keyscan    --  gen_context(system_u:object_r:qp_ssh_exec_t,s0)
+
+# libexec helpers the daemon execs (qp-sshd-session, qp-sftp-server,
+# qp-ssh-keysign, ...).
+/usr/local/qp/libexec(/.*)?             gen_context(system_u:object_r:qp_sshd_libexec_t,s0)
+
+# qp-sshd-auth: the unprivileged preauth child gets its OWN exec type (more
+# specific than the libexec rule above, so it wins) so the daemon transitions into
+# the isolated qp_sshd_net_t only on this helper.
+/usr/local/qp/libexec/qp-sshd-auth      --  gen_context(system_u:object_r:qp_sshd_auth_exec_t,s0)
+
+# Bundled OpenSSL + liboqs shared objects.
+/usr/local/qp/lib(/.*)?                 gen_context(system_u:object_r:qp_ssh_lib_t,s0)
+
+# Config tree (qp-sshd_config, ssh_config, moduli, *.pub).
+/usr/local/qp/etc(/.*)?                 gen_context(system_u:object_r:qp_sshd_etc_t,s0)
+
+# Private host keys — tighter type (more specific than the etc rule above, so
+# it wins; the matching *.pub files stay qp_sshd_etc_t).
+/usr/local/qp/etc/qp-ssh_host_.*_key    --  gen_context(system_u:object_r:qp_sshd_key_t,s0)

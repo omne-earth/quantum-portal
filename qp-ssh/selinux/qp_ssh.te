@@ -1,0 +1,246 @@
+policy_module(qp_ssh, 1.0.0)
+
+########################################
+# Declarations
+########################################
+#
+# Custom qp-ssh SELinux domain — deliberately NOT the distro's sshd_t, so
+# qp-ssh's confinement is independent of the OS openssh policy release cycle.
+
+# qp-sshd daemon. systemd (init_t) -> qp_sshd_t on exec of the binary.
+type qp_sshd_t;
+type qp_sshd_exec_t;
+init_daemon_domain(qp_sshd_t, qp_sshd_exec_t)
+
+# Client + helper binaries: qp-ssh, qp-scp, qp-sftp, qp-ssh-keygen, qp-ssh-add,
+# qp-ssh-agent, qp-ssh-keyscan. Interactive — run in the caller's domain.
+type qp_ssh_exec_t;
+application_executable_file(qp_ssh_exec_t)
+
+# Config + host keys under /usr/local/qp/etc: qp-sshd_config, ssh_config,
+# moduli, qp-ssh_host_mldsa87_key(.pub), qp-ssh_host_falcon1024_key(.pub).
+type qp_sshd_etc_t;
+files_config_file(qp_sshd_etc_t)
+
+# Private host-key files (tighter type so only qp_sshd_t reads them).
+type qp_sshd_key_t;
+files_type(qp_sshd_key_t)
+
+# Bundled OpenSSL + liboqs shared objects, rpath'd under /usr/local/qp/lib.
+type qp_ssh_lib_t;
+files_type(qp_ssh_lib_t)
+
+# libexec helpers exec'd by the daemon (qp-sshd-session, qp-sftp-server,
+# qp-ssh-keysign). qp-sshd-auth gets its OWN exec type below (preauth isolation).
+type qp_sshd_libexec_t;
+files_type(qp_sshd_libexec_t)
+
+# Preauth privsep isolation. qp-sshd-auth is the unprivileged, network-facing
+# child that parses untrusted client bytes BEFORE authentication (the mlkem1024
+# KEX + signature checks). It runs in a near-powerless domain of its own so a
+# preauth memory-corruption bug is boxed away from the privileged monitor —
+# qp_sshd_t holds the host keys, the broad cap set, and the session-spawn machinery;
+# qp_sshd_net_t holds only its own sandbox-setup caps (setuid/setgid/chroot, to shed
+# privilege) and none of that privileged reach. Its own entrypoint type means the
+# qp_sshd_t -> qp_sshd_net_t transition fires ONLY on this one helper, not all of
+# libexec.
+type qp_sshd_net_t;
+domain_type(qp_sshd_net_t)
+# Associate the domain with the system role — without this the transition target
+# context system_u:system_r:qp_sshd_net_t is invalid (security_compute_sid fails:
+# SELINUX_ERR invalid_context) and the exec aborts. init_daemon_domain does this
+# implicitly; a domain transitioned-to from another daemon must declare it.
+role system_r types qp_sshd_net_t;
+type qp_sshd_auth_exec_t;
+domain_entry_file(qp_sshd_net_t, qp_sshd_auth_exec_t)
+
+# Runtime PID file (/run/sshd.pid) written by qp-sshd at startup.
+type qp_sshd_var_run_t;
+files_pid_file(qp_sshd_var_run_t)
+
+# TCP listen port 1716. Custom port type (labeled via
+# `semanage port -a -t qp_ssh_port_t -p tcp 1716` in %post) so we don't lean on
+# the base policy's ssh_port_t.
+type qp_ssh_port_t;
+corenet_port(qp_ssh_port_t)
+
+# The qp-sshd unit may set NoNewPrivileges; under NNP the kernel needs
+# process2:nnp_transition for init_t -> qp_sshd_t. Harmless if NNP is off.
+allow init_t qp_sshd_t:process2 { nnp_transition nosuid_transition };
+
+########################################
+# qp-sshd — capabilities + process
+########################################
+# Privileged like any sshd: privsep (setuid/gid to 'sshd' and back), chroot to
+# /var/empty, bind the listen port, manage ptys/creds, set sched/rlimits, audit.
+# Deliberately NO sys_admin — sshd needs none of CAP_SYS_ADMIN's powers (no
+# mounts/setns; UsePAM=no => no pam_namespace polyinstantiation), and it is the
+# broadest capability to hand a network-facing root daemon. The unit's
+# CapabilityBoundingSet bounds the same set. If a real privsep/session path ever
+# AVCs on sys_admin, restore it here WITH the triggering operation named.
+allow qp_sshd_t self:capability {
+    setuid setgid setpcap net_bind_service sys_chroot
+    chown dac_override dac_read_search fowner kill
+    sys_resource sys_tty_config audit_write fsetid };
+allow qp_sshd_t self:process {
+    fork signal signull getsched setsched setrlimit
+    setexec setcap setfscreate getcap };
+allow qp_sshd_t self:fifo_file rw_fifo_file_perms;
+allow qp_sshd_t self:unix_stream_socket { create_stream_socket_perms connectto };
+allow qp_sshd_t self:unix_dgram_socket create_socket_perms;
+allow qp_sshd_t self:netlink_route_socket r_netlink_socket_perms;
+
+########################################
+# Network — listen on qp_ssh_port_t (1716), accept clients
+########################################
+allow qp_sshd_t self:tcp_socket { create_stream_socket_perms accept listen };
+allow qp_sshd_t qp_ssh_port_t:tcp_socket name_bind;
+corenet_all_recvfrom_unlabeled(qp_sshd_t)
+corenet_tcp_sendrecv_generic_if(qp_sshd_t)
+corenet_tcp_sendrecv_generic_node(qp_sshd_t)
+corenet_tcp_bind_generic_node(qp_sshd_t)
+
+########################################
+# Files — config, host keys, libs, libexec helpers
+########################################
+read_files_pattern(qp_sshd_t, qp_sshd_etc_t, qp_sshd_etc_t)
+list_dirs_pattern(qp_sshd_t, qp_sshd_etc_t, qp_sshd_etc_t)
+
+read_files_pattern(qp_sshd_t, qp_sshd_key_t, qp_sshd_key_t)
+
+# Bundled .so libraries (execute/map for loading the rpath'd objects). NO execmod:
+# the bundled libcrypto/libssl are position-independent (no TEXTREL — verified with
+# `readelf -d`), and liboqs is static (liboqs.a), so nothing needs writable-then-
+# executable text pages. If a future bundled .so carries text relocations, restore
+# execmod here WITH the offending library named (better: build it PIC).
+allow qp_sshd_t qp_ssh_lib_t:dir list_dir_perms;
+allow qp_sshd_t qp_ssh_lib_t:file { read getattr open map execute execute_no_trans };
+
+# Exec the daemon's own binary + libexec helpers inside qp_sshd_t (no transition).
+can_exec(qp_sshd_t, qp_sshd_exec_t)
+allow qp_sshd_t qp_sshd_libexec_t:dir list_dir_perms;
+allow qp_sshd_t qp_sshd_libexec_t:file { read getattr open map execute execute_no_trans };
+
+########################################
+# Preauth privsep child — qp_sshd_net_t (the network-facing untrusted parser)
+########################################
+# qp_sshd_t execs qp-sshd-auth -> auto-transition into the preauth domain.
+domtrans_pattern(qp_sshd_t, qp_sshd_auth_exec_t, qp_sshd_net_t)
+# OpenSSH's privsep child sets no_new_privs before exec'ing the preauth helper, so
+# the transition is NNP-gated — the kernel needs process2:nnp_transition (same as
+# init_t -> qp_sshd_t above). Without it: `privsep_preauth: exec of qp-sshd-auth
+# failed: Permission denied` and every handshake resets.
+allow qp_sshd_t qp_sshd_net_t:process2 { nnp_transition nosuid_transition };
+
+# Enforcing. The rule set here was derived from a clean handshake AVC pass
+# (permissive shakedown -> audit2allow, then a second pass with dontaudit disabled
+# confirming zero residual denials). Isolation holds: own domain + entrypoint, only
+# the sandbox-setup caps below (used to SHED privilege), and NO host-key
+# (qp_sshd_key_t) or user-home (authorized_keys) access — those stay with the monitor.
+
+# Privsep sandbox: the preauth child sets up its OWN jail — setuid/setgid to drop
+# to the unprivileged 'sshd' user and sys_chroot into /var/empty. These are the
+# ONLY capabilities it holds (vs the monitor's broad set), and it uses them to SHED
+# privilege, not wield it.
+allow qp_sshd_net_t self:capability { setuid setgid sys_chroot };
+allow qp_sshd_net_t self:process { fork signal signull getsched setrlimit setcap };
+
+# Inherits + uses the client TCP socket and the monitor IPC (socketpair/fds), both
+# created by qp_sshd_t; speaks to the monitor to request the privileged ops
+# (host-key signing, authorized_keys checks) it deliberately cannot do itself.
+allow qp_sshd_net_t qp_sshd_t:tcp_socket { read write getattr getopt setopt };
+allow qp_sshd_net_t qp_sshd_t:unix_stream_socket { read write };
+allow qp_sshd_net_t qp_sshd_t:unix_dgram_socket { read write };
+allow qp_sshd_net_t qp_sshd_t:fd use;
+allow qp_sshd_net_t self:tcp_socket rw_socket_perms;
+allow qp_sshd_net_t self:udp_socket create_socket_perms;
+allow qp_sshd_net_t self:unix_stream_socket create_stream_socket_perms;
+allow qp_sshd_net_t self:fifo_file rw_fifo_file_perms;
+allow qp_sshd_net_t self:netlink_route_socket create_netlink_socket_perms;
+
+# The monitor (qp_sshd_t) sets fork/exec attributes on the preauth child.
+allow qp_sshd_t qp_sshd_net_t:process { noatsecure rlimitinh siginh };
+
+# nsswitch: getpwnam for the target user + client hostname (DNS) resolution.
+auth_use_nsswitch(qp_sshd_net_t)
+
+# The mlkem1024 KEX + ML-DSA-87 verification need entropy.
+dev_read_urand(qp_sshd_net_t)
+dev_read_rand(qp_sshd_net_t)
+
+# Load the bundled OpenSSL/liboqs objects (read-only-executable, as the monitor).
+allow qp_sshd_net_t qp_ssh_lib_t:dir list_dir_perms;
+allow qp_sshd_net_t qp_ssh_lib_t:file { read getattr open map execute execute_no_trans };
+
+# Standard runtime plumbing. DELIBERATELY NOT granted: host keys (qp_sshd_key_t),
+# user homes (authorized_keys), or any capability — those stay with the monitor.
+libs_use_ld_so(qp_sshd_net_t)
+libs_use_shared_libs(qp_sshd_net_t)
+miscfiles_read_localization(qp_sshd_net_t)
+kernel_read_system_state(qp_sshd_net_t)
+
+########################################
+# Privsep jail — /var/empty
+########################################
+files_search_var(qp_sshd_t)
+files_read_var_lib_files(qp_sshd_t)
+# chroot(/var/empty) needs search on the empty jail dir (var_t by default).
+allow qp_sshd_t self:capability sys_chroot;
+
+# Runtime PID file: create/write /run/sshd.pid, typed via filetrans so it lands
+# as qp_sshd_var_run_t rather than the denied generic var_run_t.
+manage_files_pattern(qp_sshd_t, qp_sshd_var_run_t, qp_sshd_var_run_t)
+files_pid_filetrans(qp_sshd_t, qp_sshd_var_run_t, file)
+
+########################################
+# Authentication + user sessions
+########################################
+# sshd is a login program: PAM/pubkey auth, login records (utmp/wtmp), PTY
+# allocation, and the pam_selinux-driven transition into the authenticated
+# user's domain. auth_login_pgm_domain wires up that whole machinery (this is
+# what login/sshd/gdm use), so qp_sshd_t can spawn the user's session.
+auth_login_pgm_domain(qp_sshd_t)
+auth_use_nsswitch(qp_sshd_t)
+
+# Pubkey auth reads ~/.qp-ssh/authorized_keys under the user's home.
+userdom_search_user_home_dirs(qp_sshd_t)
+userdom_read_user_home_content_files(qp_sshd_t)
+
+# Allocate ptys for interactive sessions.
+term_use_ptmx(qp_sshd_t)
+term_setattr_generic_ptys(qp_sshd_t)
+
+# Land the session in the user's login domain, not qp_sshd_t. With --with-selinux,
+# qp-sshd setexeccon's the session into the user's context and execs their shell —
+# on the targeted policy that's unconfined_t. auth_login_pgm_domain sets up the
+# login program but does NOT grant the unconfined user-domain transition;
+# unconfined_shell_domtrans adds qp_sshd_t to the unconfined_login_domain attribute
+# (the full qp_sshd_t -> unconfined_t shell-transition machinery — how login/sshd/
+# gdm get it). Without it the session is stuck in qp_sshd_t and bash exec is denied.
+# Confined logins (user_u/staff_u) would need their own transition added here.
+optional_policy(`
+	unconfined_shell_domtrans(qp_sshd_t)
+')
+
+########################################
+# Standard daemon plumbing
+########################################
+libs_use_ld_so(qp_sshd_t)
+libs_use_shared_libs(qp_sshd_t)
+miscfiles_read_localization(qp_sshd_t)
+dev_read_urand(qp_sshd_t)
+dev_read_rand(qp_sshd_t)
+kernel_read_system_state(qp_sshd_t)
+kernel_read_network_state(qp_sshd_t)
+logging_send_syslog_msg(qp_sshd_t)
+logging_send_audit_msgs(qp_sshd_t)
+sysnet_dns_name_resolve(qp_sshd_t)
+
+########################################
+# Client (interactive use of qp-ssh, qp-scp, ...)
+########################################
+# Anyone who can exec the client binaries runs them in their own domain and
+# connects out to a qp-sshd (DAC/network gated). corecmd makes them runnable.
+optional_policy(`
+    corecmd_executable_file(qp_ssh_exec_t)
+')

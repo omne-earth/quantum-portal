@@ -1,0 +1,12 @@
+# qp-stunnel loopback-smoke config template. The smoke renders the @PLACEHOLDERS@
+# (sed) into a temp file. This is the TEST config — production config lives in
+# qp-stunnel/packaging/ and binds the operator mesh interface with an EJBCA cert.
+foreground = yes
+
+[qp-stunnel-smoke]
+accept     = @ACCEPT@
+connect    = @CONNECT@
+cert       = @CERT@
+key        = @KEY@
+sslVersion = TLSv1.3
+curves     = @CURVES@

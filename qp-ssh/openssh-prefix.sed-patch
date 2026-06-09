@@ -1,0 +1,29 @@
+# Wire @program_prefix@ into Makefile.in
+
+# Add variable after abs_top_builddir
+/^abs_top_builddir=/a\PROGRAM_PREFIX=@program_prefix@
+
+# Path variable definitions (compiled into binaries as _PATH_*)
+s|SSH_PROGRAM=@bindir@/ssh|SSH_PROGRAM=@bindir@/$(PROGRAM_PREFIX)ssh|
+s|ASKPASS_PROGRAM=\$(libexecdir)/ssh-askpass|ASKPASS_PROGRAM=$(libexecdir)/$(PROGRAM_PREFIX)ssh-askpass|
+s|SFTP_SERVER=\$(libexecdir)/sftp-server|SFTP_SERVER=$(libexecdir)/$(PROGRAM_PREFIX)sftp-server|
+s|SSH_KEYSIGN=\$(libexecdir)/ssh-keysign|SSH_KEYSIGN=$(libexecdir)/$(PROGRAM_PREFIX)ssh-keysign|
+s|SSHD_SESSION=\$(libexecdir)/sshd-session|SSHD_SESSION=$(libexecdir)/$(PROGRAM_PREFIX)sshd-session|
+s|SSHD_AUTH=\$(libexecdir)/sshd-auth|SSHD_AUTH=$(libexecdir)/$(PROGRAM_PREFIX)sshd-auth|
+s|SSH_PKCS11_HELPER=\$(libexecdir)/ssh-pkcs11-helper|SSH_PKCS11_HELPER=$(libexecdir)/$(PROGRAM_PREFIX)ssh-pkcs11-helper|
+s|SSH_SK_HELPER=\$(libexecdir)/ssh-sk-helper|SSH_SK_HELPER=$(libexecdir)/$(PROGRAM_PREFIX)ssh-sk-helper|
+
+# Install destinations — bindir
+s|\$(DESTDIR)\$(bindir)/ssh\$(EXEEXT)|\$(DESTDIR)\$(bindir)/\$(PROGRAM_PREFIX)ssh\$(EXEEXT)|
+s|\$(DESTDIR)\$(bindir)/scp\$(EXEEXT)|\$(DESTDIR)\$(bindir)/\$(PROGRAM_PREFIX)scp\$(EXEEXT)|
+s|\$(DESTDIR)\$(bindir)/ssh-add\$(EXEEXT)|\$(DESTDIR)\$(bindir)/\$(PROGRAM_PREFIX)ssh-add\$(EXEEXT)|
+s|\$(DESTDIR)\$(bindir)/ssh-agent\$(EXEEXT)|\$(DESTDIR)\$(bindir)/\$(PROGRAM_PREFIX)ssh-agent\$(EXEEXT)|
+s|\$(DESTDIR)\$(bindir)/ssh-keygen\$(EXEEXT)|\$(DESTDIR)\$(bindir)/\$(PROGRAM_PREFIX)ssh-keygen\$(EXEEXT)|
+s|\$(DESTDIR)\$(bindir)/ssh-keyscan\$(EXEEXT)|\$(DESTDIR)\$(bindir)/\$(PROGRAM_PREFIX)ssh-keyscan\$(EXEEXT)|
+s|\$(DESTDIR)\$(bindir)/sftp\$(EXEEXT)|\$(DESTDIR)\$(bindir)/\$(PROGRAM_PREFIX)sftp\$(EXEEXT)|
+
+# Install destinations — sbindir
+s|\$(DESTDIR)\$(sbindir)/sshd\$(EXEEXT)|\$(DESTDIR)\$(sbindir)/\$(PROGRAM_PREFIX)sshd\$(EXEEXT)|
+
+# check-config target
+s|\$(DESTDIR)\$(sbindir)/sshd -t|\$(DESTDIR)\$(sbindir)/\$(PROGRAM_PREFIX)sshd -t|

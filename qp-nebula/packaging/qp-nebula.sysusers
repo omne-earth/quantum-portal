@@ -1,0 +1,7 @@
+# systemd-sysusers: unprivileged service user for qp-nebula (the PQ overlay-mesh
+# daemon). Owns nothing on disk - it runs the daemon (with ambient CAP_NET_ADMIN)
+# and reads the provisioned config/cert/key. Shipping it lets rpm emit
+# Provides: user(qp-nebula)/group(qp-nebula).
+#
+#Type Name       ID  GECOS                        Home dir  Shell
+u    qp-nebula  -   "qp-nebula PQ overlay mesh"   /         /usr/sbin/nologin

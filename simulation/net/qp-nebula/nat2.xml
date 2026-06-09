@@ -1,0 +1,15 @@
+<!--
+  qp-nebula sim per-node NAT network #2 (forward mode nat). node n2 sits behind this
+  NAT on 192.168.162.0/24; egress masquerades toward the pub relay segment. Paired
+  with nat1 (n1) for the double-NAT relay test.
+-->
+<network>
+  <name>nat2</name>
+  <forward mode='nat'/>
+  <bridge name='qpnnat2br0' stp='on' delay='0'/>
+  <ip family='ipv4' address='192.168.162.1' netmask='255.255.255.0'>
+    <dhcp>
+      <range start='192.168.162.10' end='192.168.162.254'/>
+    </dhcp>
+  </ip>
+</network>
