@@ -13,6 +13,6 @@ grep -q '3\.6\.2' <<<"$ver" || fail "unexpected version (want bundled 3.6.2): $v
 links="$(ldd "$ossl" 2>/dev/null)"
 grep -q "$QP/lib/libcrypto" <<<"$links" || fail "openssl not linked to bundled libcrypto"
 "$ossl" rand -hex 16 >/dev/null 2>&1 || fail "openssl rand failed"
-printf 'qp\n' | "$ossl" dgst -sha256 >/dev/null 2>&1 || fail "openssl dgst failed"
+printf 'qp\n' | "$ossl" dgst -sha384 >/dev/null 2>&1 || fail "openssl dgst failed"
 say "$ver (bundled libcrypto)"
 pass "version + rand + dgst on the bundled OpenSSL"

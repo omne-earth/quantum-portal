@@ -5,7 +5,7 @@
 // for the file-by-file plan this mirrors. Built hand-rolled, exactly as the sibling
 // qp-stunnel/pqtls hand-builds ML-DSA X.509 certs that stdlib refuses to mint.
 //
-// symmetricstate.go is the Noise core: an HKDF-SHA256-chained key, a SHA-256
+// symmetricstate.go is the Noise core: an HKDF-SHA384-chained key, a SHA-384
 // transcript hash, and an AES-256-GCM AEAD keyed off the chain. It is a Noise
 // *analog* (RFC 5869 HKDF, not Noise's bespoke byte-counter HKDF) and is NOT
 // wire-compatible with any registered Noise protocol.
@@ -15,14 +15,14 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hkdf"
-	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/binary"
 )
 
 // protocolName is hashed into the initial transcript/chaining state. It pins the
-// whole ciphersuite (pure ML-KEM-1024 KEX, AES-256-GCM AEAD, SHA-256/HKDF) so a
+// whole ciphersuite (pure ML-KEM-1024 KEX, AES-256-GCM AEAD, SHA-384/HKDF) so a
 // peer running a different suite diverges immediately.
-const protocolName = "pqIXanalog_MLKEM1024_AESGCM_SHA256"
+const protocolName = "pqIXanalog_MLKEM1024_AESGCM_SHA384"
 
 // gcmTagSize is the AES-256-GCM authentication tag length appended by Seal.
 const gcmTagSize = 16
@@ -31,41 +31,41 @@ const gcmTagSize = 16
 // h binds the full transcript, k is the current AEAD key (valid once hasKey),
 // and n is the per-key AEAD nonce counter (reset on every MixKey).
 type symmetricState struct {
-	ck     [32]byte
-	h      [32]byte
+	ck     [48]byte
+	h      [48]byte
 	k      [32]byte
 	hasKey bool
 	n      uint64
 }
 
 func newSymmetricState() *symmetricState {
-	sum := sha256.Sum256([]byte(protocolName))
+	sum := sha512.Sum384([]byte(protocolName))
 	return &symmetricState{ck: sum, h: sum}
 }
 
-// mixHash folds data into the running transcript: h = SHA256(h || data).
+// mixHash folds data into the running transcript: h = SHA384(h || data).
 func (s *symmetricState) mixHash(data []byte) {
-	hh := sha256.New()
+	hh := sha512.New384()
 	hh.Write(s.h[:])
 	hh.Write(data)
-	var out [32]byte
+	var out [48]byte
 	hh.Sum(out[:0])
 	s.h = out
 }
 
 // mixKey absorbs a fresh shared secret (a KEM output) into the chain and derives
-// the next AEAD key: HKDF-Extract(salt=ck, ikm) -> Expand to 64 bytes -> (ck, k).
+// the next AEAD key: HKDF-Extract(salt=ck, ikm) -> Expand to 80 bytes -> (ck, k).
 func (s *symmetricState) mixKey(ikm []byte) {
-	prk, err := hkdf.Extract(sha256.New, ikm, s.ck[:])
+	prk, err := hkdf.Extract(sha512.New384, ikm, s.ck[:])
 	if err != nil {
-		panic(err) // sha256/HKDF over fixed-size inputs cannot fail in practice
+		panic(err) // sha384/HKDF over fixed-size inputs cannot fail in practice
 	}
-	out, err := hkdf.Expand(sha256.New, prk, "", 64)
+	out, err := hkdf.Expand(sha512.New384, prk, "", 80)
 	if err != nil {
 		panic(err)
 	}
-	copy(s.ck[:], out[:32])
-	copy(s.k[:], out[32:])
+	copy(s.ck[:], out[:48])
+	copy(s.k[:], out[48:])
 	s.hasKey = true
 	s.n = 0
 }
@@ -124,11 +124,11 @@ func (s *symmetricState) decryptAndHash(ct []byte) ([]byte, error) {
 // HKDF-Expand(HKDF-Extract(ck, "")) -> (k_i2r, k_r2i). Both peers run this on the
 // same ck and so derive the identical pair.
 func (s *symmetricState) split() (i2r, r2i *cipherState) {
-	prk, err := hkdf.Extract(sha256.New, []byte{}, s.ck[:])
+	prk, err := hkdf.Extract(sha512.New384, []byte{}, s.ck[:])
 	if err != nil {
 		panic(err)
 	}
-	out, err := hkdf.Expand(sha256.New, prk, "", 64)
+	out, err := hkdf.Expand(sha512.New384, prk, "", 64)
 	if err != nil {
 		panic(err)
 	}
