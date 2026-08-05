@@ -1,6 +1,8 @@
 # Quantum Portal
 
-*quantum portal* is a collection of minimal viable set for quantum protected web.
+post-quantum transport hardening for self-hosted fleets — SELinux-confined RPMs for SSH, stunnel, and nebula
+
+Every node is enrolled, certificated, and operated by you; the threat is "harvest now, decrypt later," not observability. This is a mesh-VPN-class tool with post-quantum cryptography — not an anonymity network, and not a web anyone can join.
 
 ## Features
 
@@ -10,6 +12,14 @@ SELinux confined post-quantum rpms for:
 3. qp-nebula: private mesh entrypoint: machine -> machine
 
 The RPMs are designed to support parallel deployment alongside classical counterparts.
+
+## Motivation
+This project is a humble effort in response to:
+
+1. CNSA 2.0 - https://media.defense.gov/2025/May/30/2003728741/-1/-1/0/CSA_CNSA_2.0_ALGORITHMS.PDF
+2. CMMC 2.0 - https://www.cisa.gov/resources-tools/resources/cybersecurity-maturity-model-certification-20-program
+
+We at **omne** present our gratitude to the sources and projects from around the world that have been used to make *quantum-portal* possible and hope that the post-quantum migration goes smoothly.
 
 # Dependencies
 > NOTE: Only tested with Fedora 44, and is highly recommended as the build host. Other linux distros should work provided podman and toolbox are installed.
@@ -115,14 +125,6 @@ make -f Makefile.publish build-qpssh build-qpstunnel smoke-qpstunnel package-qps
 # self contained
 make -f Makefile.publish build-qpnebula smoke-qpnebula package-qpnebula install-qpnebula stress-qpnebula
 ```
-
-## Comments
-This project is a humble effort in response to:
-
-1. CNSA 2.0 - https://media.defense.gov/2025/May/30/2003728741/-1/-1/0/CSA_CNSA_2.0_ALGORITHMS.PDF
-2. CMMC 2.0 - https://www.cisa.gov/resources-tools/resources/cybersecurity-maturity-model-certification-20-program
-
-We at **omne** present our gratitude to the sources and projects from around the world that have been used to make *quantum-portal* possible and hope that the post-quantum migration goes smoothly.
 
 ## Disclaimer
 
